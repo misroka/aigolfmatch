@@ -1,6 +1,7 @@
 """Historical golf club data for major releases (2015-2025)."""
 
 import json
+from pathlib import Path
 
 # This is a starting point - expand with comprehensive data
 HISTORICAL_CLUBS = [
@@ -320,5 +321,4 @@ def save_historical_data():
 
 
 if __name__ == "__main__":
-    from pathlib import Path
     save_historical_data()
