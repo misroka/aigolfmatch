@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Golf Club Database{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+<p class="subtitle">Welcome, {{ current_user.username }}!</p>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon">🏷️</div>
+        <div class="stat-value">{{ stats.brands }}</div>
+        <div class="stat-label">Brands</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon">🏌️</div>
+        <div class="stat-value">{{ stats.clubs }}</div>
+        <div class="stat-label">Golf Clubs</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon">⭐</div>
+        <div class="stat-value">{{ stats.reviews }}</div>
+        <div class="stat-label">Reviews</div>
+    </div>
+    
+    <div class="stat-card">
+        <div class="stat-icon">👤</div>
+        <div class="stat-value">{{ stats.profiles }}</div>
+        <div class="stat-label">Reviewer Profiles</div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="dashboard-section">
+        <h2>Recent Clubs</h2>
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Brand</th>
+                        <th>Model</th>
+                        <th>Type</th>
+                        <th>Year</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for club in recent_clubs %}
+                    <tr>
+                        <td>{{ club.brand }}</td>
+                        <td>{{ club.model_name }}</td>
+                        <td>{{ club.type }}</td>
+                        <td>{{ club.year_released }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <a href="{{ url_for('clubs') }}" class="btn btn-secondary">View All Clubs →</a>
+    </div>
+    
+    <div class="dashboard-section">
+        <h2>Top Brands</h2>
+        <div class="brand-list">
+            {% for brand in top_brands %}
+            <div class="brand-item">
+                <span class="brand-name">{{ brand.name }}</span>
+                <span class="brand-count">{{ brand.club_count }} clubs</span>
+            </div>
+            {% endfor %}
+        </div>
+        <a href="{{ url_for('brands') }}" class="btn btn-secondary">View All Brands →</a>
+    </div>
+</div>
+
+<div class="quick-actions">
+    <h2>Quick Actions</h2>
+    <div class="action-buttons">
+        <a href="{{ url_for('clubs') }}" class="btn btn-primary">Browse Clubs</a>
+        <a href="{{ url_for('search') }}" class="btn btn-primary">Search Database</a>
+        <a href="{{ url_for('profiles') }}" class="btn btn-primary">Reviewer Profiles</a>
+    </div>
+</div>
+{% endblock %}

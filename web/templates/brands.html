@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Brands - Golf Club Database{% endblock %}
+
+{% block content %}
+<h1>Golf Brands</h1>
+<p class="subtitle">{{ brands|length }} brands in database</p>
+
+<div class="brands-grid">
+    {% for brand in brands %}
+    <div class="brand-card">
+        <h3>{{ brand.name }}</h3>
+        {% if brand.country %}
+        <p class="brand-country">🌍 {{ brand.country }}</p>
+        {% endif %}
+        <p class="brand-clubs">{{ brand.club_count }} clubs</p>
+        {% if brand.website %}
+        <a href="{{ brand.website }}" target="_blank" class="brand-link">Website →</a>
+        {% endif %}
+        <a href="{{ url_for('clubs', brand=brand.name) }}" class="btn btn-sm btn-block">View Clubs</a>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

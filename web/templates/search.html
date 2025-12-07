@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Golf Club Database{% endblock %}
+
+{% block content %}
+<h1>Search</h1>
+
+<form method="GET" action="{{ url_for('search') }}" class="search-form">
+    <div class="search-input-group">
+        <input type="text" name="q" value="{{ query }}" 
+               placeholder="Search by brand or model..." 
+               class="search-input" autofocus>
+        <button type="submit" class="btn btn-primary">Search</button>
+    </div>
+</form>
+
+{% if query %}
+<p class="subtitle">{{ clubs|length }} results for "{{ query }}"</p>
+
+<div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Brand</th>
+                <th>Model</th>
+                <th>Type</th>
+                <th>Year</th>
+                <th>Price</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for club in clubs %}
+            <tr>
+                <td>{{ club.brand_name }}</td>
+                <td>{{ club.model_name }}</td>
+                <td>{{ club.club_type_name }}</td>
+                <td>{{ club.year_released }}</td>
+                <td>{{ '${:,.2f}'.format(club.current_price) if club.current_price else 'N/A' }}</td>
+                <td>
+                    <a href="{{ url_for('club_detail', club_id=club.id) }}" class="btn btn-sm">View</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" class="text-center">No results found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

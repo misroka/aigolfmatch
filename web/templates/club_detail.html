@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}{{ club.model_name }} - Golf Club Database{% endblock %}
+
+{% block content %}
+<div class="club-detail">
+    <div class="club-header">
+        <a href="{{ url_for('clubs') }}" class="back-link">← Back to Clubs</a>
+        <h1>{{ club.brand_name }} {{ club.model_name }}</h1>
+        <p class="club-meta">{{ club.club_type_name }} • {{ club.year_released }}</p>
+    </div>
+    
+    <div class="club-info-grid">
+        <div class="info-section">
+            <h2>Details</h2>
+            <dl class="info-list">
+                <dt>Brand</dt>
+                <dd>{{ club.brand_name }}</dd>
+                
+                <dt>Model</dt>
+                <dd>{{ club.model_name }}</dd>
+                
+                <dt>Type</dt>
+                <dd>{{ club.club_type_name }}</dd>
+                
+                <dt>Year Released</dt>
+                <dd>{{ club.year_released }}</dd>
+                
+                {% if club.year_discontinued %}
+                <dt>Discontinued</dt>
+                <dd>{{ club.year_discontinued }}</dd>
+                {% endif %}
+                
+                <dt>MSRP</dt>
+                <dd>{{ '${:,.2f}'.format(club.msrp) if club.msrp else 'N/A' }}</dd>
+                
+                <dt>Current Price</dt>
+                <dd>{{ '${:,.2f}'.format(club.current_price) if club.current_price else 'N/A' }}</dd>
+                
+                <dt>Status</dt>
+                <dd>
+                    {% if club.is_current %}
+                    <span class="badge badge-success">Current</span>
+                    {% else %}
+                    <span class="badge badge-secondary">Discontinued</span>
+                    {% endif %}
+                </dd>
+                
+                {% if club.skill_level %}
+                <dt>Skill Level</dt>
+                <dd>{{ club.skill_level }}</dd>
+                {% endif %}
+                
+                {% if club.gender %}
+                <dt>Gender</dt>
+                <dd>{{ club.gender }}</dd>
+                {% endif %}
+                
+                {% if club.hand %}
+                <dt>Hand</dt>
+                <dd>{{ club.hand }}</dd>
+                {% endif %}
+            </dl>
+        </div>
+        
+        {% if club.loft_degrees or club.shaft_material or club.club_length_inches %}
+        <div class="info-section">
+            <h2>Specifications</h2>
+            <dl class="info-list">
+                {% if club.loft_degrees %}
+                <dt>Loft</dt>
+                <dd>{{ club.loft_degrees }}°</dd>
+                {% endif %}
+                
+                {% if club.lie_angle_degrees %}
+                <dt>Lie Angle</dt>
+                <dd>{{ club.lie_angle_degrees }}°</dd>
+                {% endif %}
+                
+                {% if club.club_length_inches %}
+                <dt>Length</dt>
+                <dd>{{ club.club_length_inches }}"</dd>
+                {% endif %}
+                
+                {% if club.swing_weight %}
+                <dt>Swing Weight</dt>
+                <dd>{{ club.swing_weight }}</dd>
+                {% endif %}
+                
+                {% if club.shaft_material %}
+                <dt>Shaft Material</dt>
+                <dd>{{ club.shaft_material }}</dd>
+                {% endif %}
+                
+                {% if club.shaft_flex %}
+                <dt>Shaft Flex</dt>
+                <dd>{{ club.shaft_flex }}</dd>
+                {% endif %}
+                
+                {% if club.shaft_model %}
+                <dt>Shaft Model</dt>
+                <dd>{{ club.shaft_model }}</dd>
+                {% endif %}
+                
+                {% if club.club_head_volume_cc %}
+                <dt>Head Volume</dt>
+                <dd>{{ club.club_head_volume_cc }}cc</dd>
+                {% endif %}
+            </dl>
+        </div>
+        {% endif %}
+    </div>
+    
+    {% if club.description %}
+    <div class="info-section">
+        <h2>Description</h2>
+        <p>{{ club.description }}</p>
+    </div>
+    {% endif %}
+    
+    {% if reviews %}
+    <div class="info-section">
+        <h2>Reviews ({{ reviews|length }})</h2>
+        <div class="reviews-list">
+            {% for review in reviews %}
+            <div class="review-card">
+                <div class="review-header">
+                    <span class="review-rating">⭐ {{ review.rating }}/5.0</span>
+                    {% if review.review_date %}
+                    <span class="review-date">{{ review.review_date }}</span>
+                    {% endif %}
+                </div>
+                
+                {% if review.review_title %}
+                <h3 class="review-title">{{ review.review_title }}</h3>
+                {% endif %}
+                
+                {% if review.review_text %}
+                <p class="review-text">{{ review.review_text }}</p>
+                {% endif %}
+                
+                {% if review.reviewer_handicap or review.reviewer_swing_speed %}
+                <div class="reviewer-info">
+                    <strong>Reviewer Profile:</strong>
+                    {% if review.reviewer_handicap %}
+                    Handicap: {{ review.reviewer_handicap }}
+                    {% endif %}
+                    {% if review.reviewer_swing_speed %}
+                    • Swing Speed: {{ review.reviewer_swing_speed }} mph
+                    {% endif %}
+                    {% if review.reviewer_skill_level %}
+                    • {{ review.reviewer_skill_level }}
+                    {% endif %}
+                </div>
+                {% endif %}
+                
+                {% if review.pros %}
+                <div class="review-pros">
+                    <strong>Pros:</strong> {{ review.pros|join(', ') }}
+                </div>
+                {% endif %}
+                
+                {% if review.cons %}
+                <div class="review-cons">
+                    <strong>Cons:</strong> {{ review.cons|join(', ') }}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div class="info-section">
+        <p class="text-muted">No reviews available for this club yet.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

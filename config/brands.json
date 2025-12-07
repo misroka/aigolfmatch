@@ -1,0 +1,145 @@
+{
+  "major_brands": [
+    {
+      "name": "TaylorMade",
+      "country": "USA",
+      "website": "https://www.taylormadegolf.com",
+      "priority": 1
+    },
+    {
+      "name": "Callaway",
+      "country": "USA",
+      "website": "https://www.callawaygolf.com",
+      "priority": 1
+    },
+    {
+      "name": "Titleist",
+      "country": "USA",
+      "website": "https://www.titleist.com",
+      "priority": 1
+    },
+    {
+      "name": "Ping",
+      "country": "USA",
+      "website": "https://www.ping.com",
+      "priority": 1
+    },
+    {
+      "name": "Cobra",
+      "country": "USA",
+      "website": "https://www.cobragolf.com",
+      "priority": 2
+    },
+    {
+      "name": "Mizuno",
+      "country": "Japan",
+      "website": "https://www.mizunogolf.com",
+      "priority": 2
+    },
+    {
+      "name": "Srixon",
+      "country": "Japan",
+      "website": "https://www.srixon.com",
+      "priority": 2
+    },
+    {
+      "name": "Cleveland Golf",
+      "country": "USA",
+      "website": "https://www.clevelandgolf.com",
+      "priority": 2
+    },
+    {
+      "name": "Wilson",
+      "country": "USA",
+      "website": "https://www.wilson.com/golf",
+      "priority": 2
+    },
+    {
+      "name": "PXG",
+      "country": "USA",
+      "website": "https://www.pxg.com",
+      "priority": 2
+    },
+    {
+      "name": "Honma",
+      "country": "Japan",
+      "website": "https://www.honmagolf.com",
+      "priority": 3
+    },
+    {
+      "name": "Tour Edge",
+      "country": "USA",
+      "website": "https://www.touredge.com",
+      "priority": 3
+    },
+    {
+      "name": "Adams Golf",
+      "country": "USA",
+      "website": "https://www.adamsgolf.com",
+      "priority": 3
+    },
+    {
+      "name": "Nike Golf",
+      "country": "USA",
+      "website": "https://www.nike.com",
+      "priority": 3,
+      "note": "Discontinued in 2016, but clubs still in market"
+    },
+    {
+      "name": "Ben Hogan",
+      "country": "USA",
+      "website": "https://www.benhogangolf.com",
+      "priority": 3
+    },
+    {
+      "name": "Sub 70",
+      "country": "USA",
+      "website": "https://www.sub70.com",
+      "priority": 3
+    },
+    {
+      "name": "Maltby",
+      "country": "USA",
+      "website": "https://www.golfworks.com",
+      "priority": 3
+    }
+  ],
+  "data_sources": [
+    {
+      "name": "PGA Tour Superstore",
+      "url": "https://www.pgatoursuperstore.com",
+      "type": "retailer",
+      "api_available": false
+    },
+    {
+      "name": "Golf Galaxy",
+      "url": "https://www.golfgalaxy.com",
+      "type": "retailer",
+      "api_available": false
+    },
+    {
+      "name": "Global Golf",
+      "url": "https://www.globalgolf.com",
+      "type": "retailer",
+      "api_available": false
+    },
+    {
+      "name": "2nd Swing",
+      "url": "https://www.2ndswing.com",
+      "type": "retailer",
+      "api_available": false
+    },
+    {
+      "name": "Golf Avenue",
+      "url": "https://www.golfavenue.com",
+      "type": "retailer",
+      "api_available": false
+    },
+    {
+      "name": "Rock Bottom Golf",
+      "url": "https://www.rockbottomgolf.com",
+      "type": "retailer",
+      "api_available": false
+    }
+  ]
+}

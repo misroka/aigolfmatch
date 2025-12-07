@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Reviewer Profiles - Golf Club Database{% endblock %}
+
+{% block content %}
+<h1>Reviewer Profiles</h1>
+<p class="subtitle">{{ profiles|length }} profiles found</p>
+
+<div class="filters">
+    <form method="GET" action="{{ url_for('profiles') }}" class="filter-form">
+        <div class="filter-group">
+            <label for="handicap_min">Min Handicap</label>
+            <input type="number" name="handicap_min" id="handicap_min" 
+                   value="{{ filters.handicap_min or '' }}" 
+                   placeholder="0" step="0.1" min="0" max="36">
+        </div>
+        
+        <div class="filter-group">
+            <label for="handicap_max">Max Handicap</label>
+            <input type="number" name="handicap_max" id="handicap_max" 
+                   value="{{ filters.handicap_max or '' }}" 
+                   placeholder="36" step="0.1" min="0" max="36">
+        </div>
+        
+        <div class="filter-group">
+            <label for="skill">Skill Level</label>
+            <select name="skill" id="skill">
+                <option value="">All Levels</option>
+                <option value="Beginner" {% if filters.skill == 'Beginner' %}selected{% endif %}>Beginner</option>
+                <option value="Intermediate" {% if filters.skill == 'Intermediate' %}selected{% endif %}>Intermediate</option>
+                <option value="Advanced" {% if filters.skill == 'Advanced' %}selected{% endif %}>Advanced</option>
+                <option value="Professional" {% if filters.skill == 'Professional' %}selected{% endif %}>Professional</option>
+            </select>
+        </div>
+        
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <a href="{{ url_for('profiles') }}" class="btn btn-secondary">Clear</a>
+        </div>
+    </form>
+</div>
+
+<div class="profiles-grid">
+    {% for profile in profiles %}
+    <div class="profile-card">
+        <div class="profile-header">
+            <h3>👤 Profile #{{ profile.id }}</h3>
+            {% if profile.source_name %}
+            <span class="badge">{{ profile.source_name }}</span>
+            {% endif %}
+        </div>
+        
+        <dl class="profile-info">
+            {% if profile.handicap %}
+            <dt>Handicap</dt>
+            <dd>{{ profile.handicap }}</dd>
+            {% endif %}
+            
+            {% if profile.swing_speed_mph %}
+            <dt>Swing Speed</dt>
+            <dd>{{ profile.swing_speed_mph }} mph</dd>
+            {% endif %}
+            
+            {% if profile.skill_level %}
+            <dt>Skill Level</dt>
+            <dd>{{ profile.skill_level }}</dd>
+            {% endif %}
+            
+            {% if profile.average_drive_distance_yards %}
+            <dt>Avg. Drive</dt>
+            <dd>{{ profile.average_drive_distance_yards }} yards</dd>
+            {% endif %}
+            
+            {% if profile.ball_flight %}
+            <dt>Ball Flight</dt>
+            <dd>{{ profile.ball_flight }}</dd>
+            {% endif %}
+            
+            {% if profile.age %}
+            <dt>Age</dt>
+            <dd>{{ profile.age }}</dd>
+            {% endif %}
+            
+            {% if profile.years_playing %}
+            <dt>Years Playing</dt>
+            <dd>{{ profile.years_playing }}</dd>
+            {% endif %}
+            
+            {% if profile.game_improvement_priority %}
+            <dt>Focus</dt>
+            <dd>{{ profile.game_improvement_priority }}</dd>
+            {% endif %}
+        </dl>
+    </div>
+    {% else %}
+    <p class="text-center">No profiles found matching your criteria</p>
+    {% endfor %}
+</div>
+{% endblock %}

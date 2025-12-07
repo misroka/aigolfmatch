@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Browse Clubs - Golf Club Database{% endblock %}
+
+{% block content %}
+<h1>Golf Clubs</h1>
+<p class="subtitle">{{ clubs|length }} clubs found</p>
+
+<div class="filters">
+    <form method="GET" action="{{ url_for('clubs') }}" class="filter-form">
+        <div class="filter-group">
+            <label for="brand">Brand</label>
+            <select name="brand" id="brand">
+                <option value="">All Brands</option>
+                {% for brand in brands %}
+                <option value="{{ brand.name }}" {% if filters.brand == brand.name %}selected{% endif %}>
+                    {{ brand.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label for="type">Club Type</label>
+            <select name="type" id="type">
+                <option value="">All Types</option>
+                {% for type in club_types %}
+                <option value="{{ type.name }}" {% if filters.type == type.name %}selected{% endif %}>
+                    {{ type.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div class="filter-group">
+            <label for="year">Year</label>
+            <input type="number" name="year" id="year" value="{{ filters.year or '' }}" 
+                   placeholder="e.g., 2023" min="2015" max="2025">
+        </div>
+        
+        <div class="filter-group">
+            <label for="skill">Skill Level</label>
+            <select name="skill" id="skill">
+                <option value="">All Levels</option>
+                <option value="Beginner" {% if filters.skill == 'Beginner' %}selected{% endif %}>Beginner</option>
+                <option value="Intermediate" {% if filters.skill == 'Intermediate' %}selected{% endif %}>Intermediate</option>
+                <option value="Advanced" {% if filters.skill == 'Advanced' %}selected{% endif %}>Advanced</option>
+                <option value="Professional" {% if filters.skill == 'Professional' %}selected{% endif %}>Professional</option>
+            </select>
+        </div>
+        
+        <div class="filter-actions">
+            <button type="submit" class="btn btn-primary">Apply Filters</button>
+            <a href="{{ url_for('clubs') }}" class="btn btn-secondary">Clear</a>
+        </div>
+    </form>
+</div>
+
+<div class="table-responsive">
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Brand</th>
+                <th>Model</th>
+                <th>Type</th>
+                <th>Year</th>
+                <th>MSRP</th>
+                <th>Current Price</th>
+                <th>Skill Level</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for club in clubs %}
+            <tr>
+                <td>{{ club.brand_name }}</td>
+                <td>{{ club.model_name }}</td>
+                <td>{{ club.club_type_name }}</td>
+                <td>{{ club.year_released }}</td>
+                <td>{{ '${:,.2f}'.format(club.msrp) if club.msrp else 'N/A' }}</td>
+                <td>{{ '${:,.2f}'.format(club.current_price) if club.current_price else 'N/A' }}</td>
+                <td>{{ club.skill_level or 'N/A' }}</td>
+                <td>
+                    <a href="{{ url_for('club_detail', club_id=club.id) }}" class="btn btn-sm">View</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="8" class="text-center">No clubs found matching your criteria</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
