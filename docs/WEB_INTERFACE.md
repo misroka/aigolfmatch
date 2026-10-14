@@ -165,6 +165,8 @@ questionnaires or golfer identifiers. Monitor 503s, empty-result rate, stale off
 feedback coverage, held-out error, and cold-start quality before rollout. Database
 connections currently open per operation; provision appropriate connection limits.
 Model artifacts must remain trusted, locally generated JSON under `artifacts/`.
+Relative `RECOMMENDER_MODEL_PATH` values resolve from the repository root, even
+when the web application is started from its `web` directory.
 
 ## Validation
 

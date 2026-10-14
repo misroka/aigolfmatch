@@ -12,9 +12,13 @@ FEATURE_NAMES = [
 BASE_INTERCEPT = 0.2
 BASE_COEFFICIENTS = [0.12, 0.14, 0.10, 0.04, -0.04, -0.04, -0.04, -0.04]
 OBJECTIVE = "carry_yards / 400 - dispersion_yards / 150"
+SPLIT_METHOD = "latest_available_at_quarter_then_purge_overlapping_golfers"
+TIMESTAMP_BASIS = "available_at = max(measured_at, collected_at); measured_at only when collected_at absent"
 LIMITATIONS = [
     "Utility is a carry/dispersion proxy, not a true best club or causal fitting efficacy.",
     "Heuristic fit assumptions and observational outcomes may not generalize; verify with a fitter.",
+    "Collection-time catalog snapshots may differ from the actual club configuration used in a measurement.",
+    "Only the supplied specification variant is evaluated; other loft or shaft variants are not compared.",
 ]
 SKILLS = {"beginner": 0, "intermediate": 1, "advanced": 2, "professional": 3}
 FLEX = {
@@ -112,7 +116,7 @@ def _finite_tree(value):
         return all(_finite_tree(v) for v in value.values())
     if isinstance(value, list):
         return all(_finite_tree(v) for v in value)
-    return not isinstance(value, (float, int)) or (not isinstance(value, bool) and math.isfinite(value))
+    return not isinstance(value, (float, int)) or (not isinstance(value, bool) and number(value) is not None)
 
 
 def validate_model(model):
@@ -136,13 +140,15 @@ def validate_model(model):
         raise ValueError("Invalid training club metadata.")
     outcome_ids = model.get("outcome_ids")
     if (not isinstance(outcome_ids, list) or not outcome_ids
-            or any(not isinstance(v, str) or not v.isascii() or not v.isdecimal() or int(v) <= 0
+            or any(type(v) is not int or not 1 <= v <= 9223372036854775807
                    for v in outcome_ids)
             or len(outcome_ids) != len(set(outcome_ids))):
         raise ValueError("Model requires a unique positive outcome_ids consent-revalidation manifest.")
     evaluation = model.get("evaluation")
     if not isinstance(evaluation, dict):
         raise ValueError("Missing evaluation evidence.")
+    if evaluation.get("split") != SPLIT_METHOD or evaluation.get("timestamp_basis") != TIMESTAMP_BASIS:
+        raise ValueError("Model requires availability-time leakage-resistant evaluation.")
     try:
         count_names = (
             "train_rows", "test_rows", "train_golfers", "test_golfers",
@@ -208,7 +214,7 @@ def _eligible_offer(profile, club, now):
         if not isinstance(offer, dict):
             continue
         price = number(offer.get("price"))
-        checked = timestamp(offer.get("price_checked_at", offer.get("checked_at", offer.get("last_checked"))))
+        checked = timestamp(offer.get("price_checked_at", offer.get("checked_at")))
         if (offer.get("in_stock") is True and price is not None and 0 <= price <= budget
                 and checked is not None and timedelta(0) <= now - checked <= timedelta(hours=24)):
             eligible.append((price, offer))

@@ -43,6 +43,7 @@ def synthetic_outcomes():
                 "id": len(rows) + 1,
                 "profile": p, "club": c, "golfer_id": str(golfer), "club_id": str(c["id"]),
                 "measured_at": (start + timedelta(days=golfer)).isoformat(),
+                "collected_at": (start + timedelta(days=golfer)).isoformat(),
                 "carry_yards": (target + 0.1) * 400, "dispersion_yards": 15, "shot_count": 10,
             })
     return rows
@@ -100,6 +101,9 @@ class RecommendationTests(unittest.TestCase):
         self.assertEqual(recommend(profile(), [c]), [])
         c["price_checked_at"] = None
         self.assertEqual(recommend(profile(), [c]), [])
+        del c["price_checked_at"]
+        c["last_checked"] = c.pop("checked_at")
+        self.assertEqual(recommend(profile(), [c]), [])
 
     def test_missing_specs_signed_penalty_and_ids_not_predictors(self):
         c = club()
@@ -152,10 +156,28 @@ class RecommendationTests(unittest.TestCase):
         duplicate = copy.deepcopy(rows[-1])
         duplicate["id"] = len(rows) + 1
         duplicate["measured_at"] = "2019-01-01T00:00:00+00:00"
+        duplicate["collected_at"] = duplicate["measured_at"]
         artifact = train_model(rows + [duplicate])
         self.assertGreaterEqual(artifact["evaluation"]["counts"]["purged_rows"], 1)
         self.assertEqual(artifact["evaluation"]["counts"]["overlapping_golfers"], 0)
-        self.assertEqual(set(artifact["outcome_ids"]), {str(row["id"]) for row in rows + [duplicate]})
+        self.assertEqual(set(artifact["outcome_ids"]), {row["id"] for row in rows + [duplicate]})
+
+    def test_backdated_measurements_split_by_collection_availability(self):
+        rows = synthetic_outcomes()
+        original = train_model(rows)
+        for row in rows:
+            if int(row["golfer_id"]) >= 48:
+                row["measured_at"] = "2018-01-01T00:00:00+00:00"
+        artifact = train_model(rows)
+        self.assertEqual(artifact["evaluation"]["holdout_start"], original["evaluation"]["holdout_start"])
+        self.assertEqual(artifact["evaluation"]["counts"], original["evaluation"]["counts"])
+        self.assertIn("max(measured_at, collected_at)", artifact["evaluation"]["timestamp_basis"])
+        rows[0]["collected_at"] = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        with self.assertRaises(ValueError):
+            train_model(rows)
+        rows[0]["collected_at"] = "2020-01-01"
+        with self.assertRaises(ValueError):
+            train_model(rows)
 
     def test_weak_model_falls_back(self):
         rows = synthetic_outcomes()
@@ -195,7 +217,7 @@ class RecommendationTests(unittest.TestCase):
             self.assertEqual(load_model("local.json")["version"], 1)
         for change in ({"feature_names": ["club_id"]}, {"intercept": float("inf")},
                        {"coefficients": [0]}, {"residual_mae": -1}, {"outcome_ids": []},
-                       {"outcome_ids": ["1"]}):
+                       {"outcome_ids": [1]}, {"outcome_ids": ["1"]}):
             invalid = dict(artifact, **change)
             with self.assertRaises(ValueError):
                 recommend(profile(), [club()], invalid)

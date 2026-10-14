@@ -236,6 +236,10 @@ class PriceUpdateTests(unittest.TestCase):
         refresh = next(call for call in queries if 'UPDATE golf_clubs' in call.args[0])
         self.assertIn("INTERVAL '1 day'", refresh.args[0])
         self.assertIn('in_stock IS TRUE', refresh.args[0])
+        self.assertIn('price_checked_at <= CURRENT_TIMESTAMP', refresh.args[0])
+        self.assertIn('price BETWEEN 0 AND 99999999.99', refresh.args[0])
+        selection = queries[0].args[0]
+        self.assertIn("CURRENT_TIMESTAMP - INTERVAL '1 day'", selection)
 
 
 class MigrationTests(unittest.TestCase):

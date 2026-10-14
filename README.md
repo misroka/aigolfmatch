@@ -166,11 +166,17 @@ collected measurements (no synthetic or review-derived labels):
 python scripts/train_recommender.py --output artifacts/recommender.json
 ```
 
-Set `RECOMMENDER_MODEL_PATH` to that local JSON artifact. Training uses a time-ordered,
-golfer-disjoint holdout, comparison with the baseline, and cold-start reporting.
+Set `RECOMMENDER_MODEL_PATH` to that local JSON artifact. Training uses an
+availability-time-ordered, golfer-disjoint holdout, comparison with the baseline,
+and cold-start reporting. Availability is the later of collection and measurement
+time, so backdated measurements cannot move later catalogue snapshots into training.
 Insufficient evidence or a failed quality gate leaves baseline serving in place.
 JSON artifacts contain evaluation metadata and an outcome-ID consent manifest;
 never load model paths supplied by a client. No pre-trained validated model is shipped.
+
+Catalogue specifications describe an observed model configuration; they may not
+match the exact shaft/loft used in a fitting session. Confirm the configuration and
+measurement protocol before treating feedback as reliable training evidence.
 
 Feedback withdrawal deletes this browser session's records and invalidates affected
 model serving. Operators must remove affected exported artifacts/backups and retrain.

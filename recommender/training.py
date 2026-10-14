@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from .engine import (
-    BASE_COEFFICIENTS, BASE_INTERCEPT, FEATURE_NAMES, OBJECTIVE,
+    BASE_COEFFICIENTS, BASE_INTERCEPT, FEATURE_NAMES, OBJECTIVE, SPLIT_METHOD, TIMESTAMP_BASIS,
     features, number, predict, quality_passes, timestamp, validate_model,
 )
 
@@ -65,11 +65,15 @@ def _prepare(outcomes):
         if not isinstance(row, dict):
             raise ValueError(f"Outcome {index}: expected an object.")
         identifier = str(row.get("id", ""))
-        if (not identifier.isascii() or not identifier.isdecimal() or int(identifier) <= 0
+        if (not identifier.isascii() or not identifier.isdecimal()
+                or not 1 <= int(identifier) <= 9223372036854775807
                 or identifier in seen_ids):
             raise ValueError(f"Outcome {index}: require a unique positive database id for consent revalidation.")
         seen_ids.add(identifier)
         when = timestamp(row.get("measured_at"))
+        collected = timestamp(row.get("collected_at")) if "collected_at" in row else when
+        if collected is None or collected > now:
+            raise ValueError(f"Outcome {index}: collected_at must be timezone-aware and not in the future.")
         carry, dispersion, shots = (number(row.get(key)) for key in ("carry_yards", "dispersion_yards", "shot_count"))
         if (when is None or when > now or carry is None or not 0 <= carry <= 400
                 or dispersion is None or not 0 <= dispersion <= 150
@@ -81,7 +85,7 @@ def _prepare(outcomes):
         rows.append({
             "id": identifier,
             "golfer_id": str(row["golfer_id"]), "club_id": str(row["club_id"]),
-            "when": when, "values": features(row["profile"], row["club"]),
+            "when": max(when, collected), "values": features(row["profile"], row["club"]),
             "target": carry / 400 - dispersion / 150,
         })
     return sorted(rows, key=lambda row: row["when"])
@@ -90,9 +94,11 @@ def _prepare(outcomes):
 def train_model(outcomes):
     """Return a JSON-compatible artifact, including failed evaluation evidence.
 
-    Split the latest quarter of timestamp blocks first, then purge all holdout
-    golfer IDs from training. Never refit on the test set. The CLI saves only a
-    passed artifact; callers must not present a failed artifact as validated ML.
+    Split the latest quarter of availability-time blocks first, then purge all
+    holdout golfer IDs from training. Availability is max(measured_at, collected_at)
+    when collection time is present, preventing backdated measurements from
+    leaking later catalog knowledge into training. Never refit on the test set.
+    The CLI saves only a passed artifact; failed artifacts are not validated ML.
     """
     rows = _prepare(outcomes)
     times = sorted({row["when"] for row in rows})
@@ -130,7 +136,8 @@ def train_model(outcomes):
     known_clubs = {row["club_id"] for row in train}
     cold_indices = [i for i, row in enumerate(test) if row["club_id"] not in known_clubs]
     evaluation = {
-        "split": "latest_timestamp_quarter_then_purge_overlapping_golfers",
+        "split": SPLIT_METHOD,
+        "timestamp_basis": TIMESTAMP_BASIS,
         "holdout_start": cutoff.isoformat(), "counts": counts,
         "cold_golfer": _metrics(test, predictions, baseline),
         "new_club": _metrics([test[i] for i in cold_indices], [predictions[i] for i in cold_indices], [baseline[i] for i in cold_indices]),
@@ -143,9 +150,11 @@ def train_model(outcomes):
         "residual_mae": evaluation["cold_golfer"]["model_mae"],
         "evaluation": evaluation, "quality_gate": "passed" if quality_passes(evaluation) else "failed",
         "training_club_ids": sorted(known_clubs),
-        "outcome_ids": sorted({row["id"] for row in rows}, key=int),
+        "outcome_ids": sorted({int(row["id"]) for row in rows}),
         "trained_at": now_iso(),
         "limitations": ["Observational proxy objective, not causal efficacy or a true best-club label.",
+                        "Collection-time catalog snapshots may differ from the actual measured club configuration.",
+                        "Only supplied specification variants are evaluated, not every loft or shaft option.",
                         "Residual MAE is not a calibrated confidence interval."],
     }
     return validate_model(artifact)

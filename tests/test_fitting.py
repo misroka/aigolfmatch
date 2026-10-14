@@ -145,7 +145,7 @@ class PersistenceTests(unittest.TestCase):
         self.addCleanup(self.patch.stop)
         self.cursor = self.cursor_context.return_value.__enter__.return_value
 
-    def test_candidates_use_one_deterministic_spec_and_offer(self):
+    def test_candidates_use_one_spec_and_cheapest_fresh_available_offer(self):
         self.cursor.fetchall.return_value = [club()]
         candidates = fitting.get_recommendation_candidates("Driver")
         self.assertEqual(candidates[0]["id"], 7)
@@ -155,7 +155,13 @@ class PersistenceTests(unittest.TestCase):
         query, params = self.cursor.execute.call_args.args
         self.assertEqual(params, ("Driver",))
         self.assertIn("updated_at DESC NULLS LAST, id DESC LIMIT 1", query)
-        self.assertIn("price_checked_at DESC NULLS LAST, id DESC LIMIT 1", query)
+        self.assertIn("price ASC, price_checked_at DESC, id DESC LIMIT 1", query)
+        self.assertIn("ps.price_checked_at AS price_checked_at", query)
+        self.assertIn("in_stock IS TRUE", query)
+        self.assertIn("price BETWEEN 0 AND 99999999.99", query)
+        self.assertIn("price_checked_at <= CURRENT_TIMESTAMP", query)
+        self.assertIn(
+            "price_checked_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'", query)
         self.assertIn("gc.specs_validated IS TRUE", query)
         self.assertIn("validated IS TRUE", query)
         self.assertNotIn("last_checked", query)

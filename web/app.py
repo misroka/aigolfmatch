@@ -198,7 +198,10 @@ def api_recommendations():
         model_path = os.getenv('RECOMMENDER_MODEL_PATH')
         if model_path:
             try:
-                model = load_model(model_path)
+                configured_path = Path(model_path)
+                if not configured_path.is_absolute():
+                    configured_path = Path(__file__).resolve().parent.parent / configured_path
+                model = load_model(configured_path)
                 if model is not None and model.get('quality_gate') != 'passed':
                     model = None
                 if model is not None and not is_model_current(model):

@@ -75,6 +75,24 @@ class WebTests(unittest.TestCase):
             self.assertEqual(response.status_code, 503)
             self.assertNotIn(b'private details', response.data)
 
+    def test_failed_quality_gate_never_serves_ml(self):
+        with patch.object(web, 'validate_profile', return_value={'club_type': 'Driver'}), \
+                patch.object(web, 'get_recommendation_candidates', return_value=[]), \
+                patch.object(web, 'load_model', return_value={'quality_gate': 'failed'}), \
+                patch.object(web, 'is_model_current') as consent_check, \
+                patch.object(web, 'recommend', return_value=[]) as recommend, \
+                patch.dict(web.os.environ, {'RECOMMENDER_MODEL_PATH': '/tmp/model.json'}):
+            response = self.client.post('/api/recommendations', json={}, headers=self.headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertIsNone(recommend.call_args.kwargs['model'])
+            consent_check.assert_not_called()
+
+    def test_health_does_not_disclose_database_failure_details(self):
+        with patch.object(web.db, 'get_cursor', side_effect=RuntimeError('private connection details')):
+            response = self.client.get('/health')
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json, {'status': 'unavailable'})
+
     def test_feedback_identity_assigned_server_side(self):
         with patch.object(web, 'validate_outcome', side_effect=lambda payload: payload), \
                 patch.object(web, 'save_fitting_outcome', return_value=42) as save:

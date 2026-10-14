@@ -90,8 +90,10 @@ def refresh_current_price(cursor, club_id):
         """
         UPDATE golf_clubs SET (current_price, price_updated_at) = (
             SELECT price, price_checked_at FROM product_sources
-            WHERE golf_club_id = %s AND in_stock IS TRUE AND price IS NOT NULL
+            WHERE golf_club_id = %s AND in_stock IS TRUE
+              AND price BETWEEN 0 AND 99999999.99
               AND price_checked_at >= CURRENT_TIMESTAMP - INTERVAL '1 day'
+              AND price_checked_at <= CURRENT_TIMESTAMP
             ORDER BY price ASC, price_checked_at DESC LIMIT 1
         ), updated_at = CURRENT_TIMESTAMP WHERE id = %s
         """, (club_id, club_id),

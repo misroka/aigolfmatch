@@ -103,12 +103,12 @@ def validate_outcome(payload):
     }
 
 
-# Each lateral join picks exactly one record; unknown offer fields stay NULL.
+# Pick one specification and the cheapest fresh, explicitly available offer.
 _CANDIDATE_SELECT = """
     SELECT gc.id, b.name AS brand_name, gc.model_name,
            ct.name AS club_type_name, gc.hand, gc.skill_level,
            cs.loft_degrees, cs.shaft_flex,
-           ps.price, ps.price_checked_at,
+           ps.price, ps.price_checked_at AS price_checked_at,
            ps.in_stock, ps.source_name, ps.product_url
     FROM golf_clubs gc
     JOIN brands b ON b.id = gc.brand_id
@@ -120,8 +120,12 @@ _CANDIDATE_SELECT = """
     ) cs ON TRUE
     LEFT JOIN LATERAL (
         SELECT price, price_checked_at, in_stock, source_name, product_url
-        FROM product_sources WHERE golf_club_id = gc.id
-        ORDER BY price_checked_at DESC NULLS LAST, id DESC LIMIT 1
+        FROM product_sources
+        WHERE golf_club_id = gc.id AND in_stock IS TRUE
+              AND price BETWEEN 0 AND 99999999.99
+              AND price_checked_at <= CURRENT_TIMESTAMP
+              AND price_checked_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+        ORDER BY price ASC, price_checked_at DESC, id DESC LIMIT 1
     ) ps ON TRUE
 """
 
@@ -141,7 +145,7 @@ def _plain(value):
 
 
 def get_recommendation_candidates(club_type):
-    """Return actual catalog specifications and latest observed offers."""
+    """Return actual catalog specifications and cheapest eligible observed offers."""
     _choice({"club_type": club_type}, "club_type", CLUB_TYPES)
     with db.get_cursor() as cursor:
         cursor.execute(
