@@ -255,6 +255,19 @@ class RecommendationTests(unittest.TestCase):
         finally:
             path.unlink(missing_ok=True)
 
+    def test_trained_json_artifact_passes_db_consent_guard(self):
+        from database import fitting
+        artifact = json.loads(json.dumps(train_model(synthetic_outcomes())))
+        self.assertTrue(all(type(identifier) is int for identifier in artifact["outcome_ids"]))
+        with patch.object(fitting.db, "get_cursor") as get_cursor:
+            cursor = get_cursor.return_value.__enter__.return_value
+            cursor.fetchone.return_value = {"consented_count": len(artifact["outcome_ids"])}
+            self.assertTrue(fitting.is_model_current(artifact))
+            parameters = cursor.execute.call_args.args[1]
+            self.assertEqual(parameters[0], artifact["outcome_ids"])
+            cursor.fetchone.return_value = {"consented_count": len(artifact["outcome_ids"]) - 1}
+            self.assertFalse(fitting.is_model_current(artifact))
+
 
 if __name__ == "__main__":
     unittest.main()

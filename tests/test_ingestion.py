@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from bs4 import BeautifulSoup
 
-from database.validation import number, release_year, specifications
+from database.validation import number, release_year, specifications, handedness, skill_level
 from scripts import load_historical_data as historical
 from scripts import scrape_retailers as retailer
 from scripts import update_prices
@@ -35,6 +35,14 @@ class FakeDB:
 
 
 class ValidationTests(unittest.TestCase):
+    def test_hand_and_skill_only_normalize_known_explicit_values(self):
+        self.assertEqual(handedness(' left '), 'Left')
+        self.assertEqual(handedness('BOTH'), 'Both')
+        self.assertEqual(skill_level(' advanced '), 'Advanced')
+        for value in (None, '', 'unknown', 'ambidextrous', True):
+            self.assertIsNone(handedness(value))
+            self.assertIsNone(skill_level(value))
+
     def test_unknown_year_and_invalid_numbers(self):
         self.assertIsNone(release_year(None))
         for value in (True, float('nan'), float('inf'), -1, "free"):
@@ -55,6 +63,46 @@ class ValidationTests(unittest.TestCase):
 
 
 class ImportTests(unittest.TestCase):
+    def test_retail_retains_explicit_hand_and_skill_on_insert_and_update(self):
+        for existing in (None, {'id': 3}):
+            cursor = MagicMock()
+            cursor.fetchone.side_effect = [{'id': 1}, {'id': 2}, existing, {'id': 3}]
+            with patch.object(retailer, 'db', FakeDB(cursor)):
+                retailer.import_clubs([self.club(hand='left', skill_level='advanced')], 'Retailer')
+            if existing:
+                query = next(call for call in cursor.execute.call_args_list
+                             if 'UPDATE golf_clubs SET hand' in call.args[0])
+                self.assertEqual(query.args[1], ('Left', 'Advanced', 3))
+            else:
+                query = next(call for call in cursor.execute.call_args_list
+                             if 'INSERT INTO golf_clubs' in call.args[0])
+                self.assertEqual(query.args[1][-2:], ('Left', 'Advanced'))
+
+    def test_retail_invalid_hand_and_skill_remain_unknown(self):
+        cursor = MagicMock()
+        cursor.fetchone.side_effect = [{'id': 1}, {'id': 2}, None, {'id': 3}]
+        with patch.object(retailer, 'db', FakeDB(cursor)):
+            retailer.import_clubs([self.club(hand='unknown', skill_level='expert')], 'Retailer')
+        query = next(call for call in cursor.execute.call_args_list
+                     if 'INSERT INTO golf_clubs' in call.args[0])
+        self.assertEqual(query.args[1][-2:], (None, None))
+
+    def test_historical_retains_explicit_hand_and_validated_skill(self):
+        for existing in (None, {'id': 3}):
+            cursor = MagicMock()
+            cursor.fetchone.side_effect = [{'id': 1}, {'id': 2}, existing, {'id': 3}]
+            with patch.object(historical, 'db', FakeDB(cursor)):
+                historical.load_historical_clubs([self.club(hand='RIGHT', skill_level='beginner')])
+            if existing:
+                query = next(call for call in cursor.execute.call_args_list
+                             if 'UPDATE golf_clubs SET source_name' in call.args[0])
+                self.assertEqual(query.args[1][-3:-1], ('Right', 'Beginner'))
+            else:
+                query = next(call for call in cursor.execute.call_args_list
+                             if 'INSERT INTO golf_clubs' in call.args[0])
+                self.assertEqual(query.args[1][-1], 'Right')
+                self.assertEqual(query.args[1][7], 'Beginner')
+
     def club(self, **overrides):
         club = {'brand': 'Ping', 'model': 'Driver', 'club_type': 'Driver',
                 'year': datetime.now().year, 'price': 300,
@@ -176,6 +224,16 @@ class ScraperTests(unittest.TestCase):
           "availability":"https://schema.org/OutOfStock"}}</script>''')
         self.assertEqual(details['price'], 299.99)
         self.assertIs(details['in_stock'], False)
+
+    def test_details_explicit_dexterity_and_skill(self):
+        details = self.details('''<table class="specifications">
+          <tr><th>Dexterity</th><td>left</td></tr>
+          <tr><th>Skill Level</th><td>advanced</td></tr></table>''')
+        self.assertEqual(details['hand'], 'Left')
+        self.assertEqual(details['skill_level'], 'Advanced')
+        unknown = self.details('''<table class="specifications">
+          <tr><th>Hand</th><td>Unknown</td></tr></table>''')
+        self.assertIsNone(unknown['hand'])
 
     def test_microdata_and_unknown_stock(self):
         details = self.details('<meta itemprop="price" content="250.50">')

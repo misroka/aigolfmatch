@@ -10,7 +10,9 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.db import db, log_scrape
-from database.validation import number, release_year, specifications, SPEC_RANGES, SPEC_TEXT
+from database.validation import (
+    number, release_year, specifications, SPEC_RANGES, SPEC_TEXT, handedness, skill_level,
+)
 from psycopg2.extras import Json
 
 
@@ -80,6 +82,8 @@ def load_historical_clubs(clubs_data: list, years: int = 10,
                         raise ValueError(f"Missing {key}")
                 msrp = number(club.get('msrp'))
                 variants = specifications(club.get('specs', {}))
+                hand = handedness(club.get('hand'))
+                skill = skill_level(club.get('skill_level'))
                 provenance = club.get('source_name') or club.get('source') or source_name
                 provenance_url = club.get('source_url') or source_url
                 if not isinstance(provenance, str) or not provenance.strip():
@@ -101,19 +105,20 @@ def load_historical_clubs(clubs_data: list, years: int = 10,
                 cursor.execute(
                     """UPDATE golf_clubs SET source_name = COALESCE(source_name, %s),
                        source_url = COALESCE(source_url, %s),
-                       specs_validated = specs_validated OR %s WHERE id = %s""",
-                    (provenance, provenance_url, bool(variants), club_id),
+                       specs_validated = specs_validated OR %s,
+                       hand = COALESCE(%s, hand), skill_level = COALESCE(%s, skill_level)
+                       WHERE id = %s""",
+                    (provenance, provenance_url, bool(variants), hand, skill, club_id),
                 )
                 skipped += 1
             else:
                 cursor.execute(
                     """INSERT INTO golf_clubs
                        (brand_id, club_type_id, model_name, year_released, msrp,
-                        is_current, description, skill_level, source_name, source_url, specs_validated)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        is_current, description, skill_level, source_name, source_url, specs_validated, hand)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                     (brand_id, club_type_id, club['model'], year, msrp, year >= current_year - 2,
-                     club.get('description'), club.get('skill_level'), provenance, provenance_url,
-                     bool(variants)),
+                     club.get('description'), skill, provenance, provenance_url, bool(variants), hand),
                 )
                 club_id = cursor.fetchone()['id']
                 added += 1

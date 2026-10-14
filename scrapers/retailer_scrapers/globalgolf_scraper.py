@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from urllib.parse import urljoin
 from scrapers.base_scraper import BaseScraper
-from database.validation import release_year
+from database.validation import release_year, handedness, skill_level
 
 
 class GlobalGolfScraper(BaseScraper):
@@ -229,6 +229,10 @@ class GlobalGolfScraper(BaseScraper):
                         key = self.clean_text(cols[0].get_text()).lower()
                         value = self.clean_text(cols[1].get_text())
                         details['specifications'][key] = value
+                        if key in ('hand', 'dexterity', 'handedness'):
+                            details['hand'] = handedness(value)
+                        elif key == 'skill level':
+                            details['skill_level'] = skill_level(value)
             
             # Extract rating
             rating_elem = soup.find('span', class_='rating-value')

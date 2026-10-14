@@ -190,11 +190,16 @@ def save_fitting_outcome(data):
 
 
 def get_training_outcomes():
-    """Read only consented measurements, without joining mutable catalog data."""
+    """Read consented measurements with collection-time, not shot-time, catalog data.
+
+    Temporal training splits must use max(measured_at, collected_at): a backdated
+    measurement did not make its subsequently collected catalog snapshot available.
+    The snapshot describes the catalog, not verified actual shot configuration.
+    """
     with db.get_cursor() as cursor:
         cursor.execute("""
             SELECT id, profile, club_snapshot AS club, golfer_id::text AS golfer_id,
-                   golf_club_id AS club_id, measured_at,
+                   golf_club_id AS club_id, measured_at, collected_at,
                    carry_yards, dispersion_yards, shot_count
             FROM fitting_outcomes
             WHERE consent IS TRUE AND consented_at IS NOT NULL
@@ -208,12 +213,18 @@ def is_model_current(model):
     """Fail closed if any training/evaluation outcome has lost its consent."""
     if not isinstance(model, Mapping):
         return False
-    outcome_ids = model.get("outcome_ids")
-    if (not isinstance(outcome_ids, list) or not outcome_ids
-            or any(type(outcome_id) is not int
-                   or not 1 <= outcome_id <= 9223372036854775807
-                   for outcome_id in outcome_ids)
-            or len(set(outcome_ids)) != len(outcome_ids)):
+    manifest = model.get("outcome_ids")
+    if not isinstance(manifest, list) or not manifest:
+        return False
+    outcome_ids = []
+    for outcome_id in manifest:
+        if (isinstance(outcome_id, str) and len(outcome_id) <= 19
+                and outcome_id.isascii() and outcome_id.isdecimal()):
+            outcome_id = int(outcome_id)
+        if type(outcome_id) is not int or not 1 <= outcome_id <= 9223372036854775807:
+            return False
+        outcome_ids.append(outcome_id)
+    if len(set(outcome_ids)) != len(outcome_ids):
         return False
     try:
         with db.get_cursor() as cursor:

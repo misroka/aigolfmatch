@@ -13,6 +13,7 @@ from database.db import db, log_scrape
 from database.validation import (
     number, release_year, source_url, stock, refresh_current_price,
     specifications, SPEC_RANGES, SPEC_TEXT,
+    handedness, skill_level,
 )
 from psycopg2.extras import Json
 
@@ -86,6 +87,8 @@ def import_clubs(clubs: List[dict], source_name: str) -> tuple[int, int]:
                 price = number(club_data.get('price'))
                 availability = stock(club_data.get('in_stock'))
                 variants = specifications(club_data.get('specs', {}))
+                hand = handedness(club_data.get('hand'))
+                skill = skill_level(club_data.get('skill_level'))
             except (ValueError, TypeError, KeyError, AttributeError) as exc:
                 print(f"Skipping invalid club: {exc}")
                 continue
@@ -101,13 +104,19 @@ def import_clubs(clubs: List[dict], source_name: str) -> tuple[int, int]:
             existing = cursor.fetchone()
             if existing:
                 club_id = existing['id']
+                cursor.execute(
+                    """UPDATE golf_clubs SET hand = COALESCE(%s, hand),
+                       skill_level = COALESCE(%s, skill_level) WHERE id = %s""",
+                    (hand, skill, club_id),
+                )
                 updated += 1
             else:
                 cursor.execute(
                     """INSERT INTO golf_clubs
-                       (brand_id, club_type_id, model_name, year_released, source_name, source_url)
-                       VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-                    (brand_id, club_type_id, model, year, source_name, url),
+                       (brand_id, club_type_id, model_name, year_released, source_name, source_url,
+                        hand, skill_level)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (brand_id, club_type_id, model, year, source_name, url, hand, skill),
                 )
                 club_id = cursor.fetchone()['id']
                 added += 1

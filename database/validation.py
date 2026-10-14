@@ -19,6 +19,20 @@ SPEC_TEXT = (
 )
 
 
+def handedness(value):
+    """Unknown source values must not imply compatibility with either hand."""
+    if not isinstance(value, str):
+        return None
+    return {"right": "Right", "left": "Left", "both": "Both"}.get(value.strip().lower())
+
+
+def skill_level(value):
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().title()
+    return normalized if normalized in ("Beginner", "Intermediate", "Advanced", "Professional") else None
+
+
 def number(value, minimum=0, maximum=99999999.99):
     if value is None:
         return None
