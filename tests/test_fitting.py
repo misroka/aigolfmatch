@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 from database import fitting
-from database.db import DatabaseConnection, get_club_by_id
+from database.db import DatabaseConnection, get_club_by_id, update_club_price
 
 
 def profile():
@@ -221,6 +221,7 @@ class PersistenceTests(unittest.TestCase):
         query, params = self.cursor.execute.call_args.args
         self.assertIn("club_snapshot AS club", query)
         self.assertIn("measured_at, collected_at", query)
+        self.assertIn("ORDER BY GREATEST(measured_at, collected_at), id", query)
         self.assertIn("consent IS TRUE", query)
         self.assertIn("consented_at IS NOT NULL", query)
         self.assertNotIn("JOIN", query)
@@ -235,19 +236,27 @@ class PersistenceTests(unittest.TestCase):
             {"outcome_ids": [9223372036854775808]},
             {"outcome_ids": ["-1"]}, {"outcome_ids": ["1.5"]},
             {"outcome_ids": ["9" * 100]}, {"outcome_ids": [""]},
-            {"outcome_ids": [1, "1"]},
+            {"outcome_ids": [1, "1"]}, {"outcome_ids": ["1"]},
         ):
             with self.subTest(model=model):
                 self.assertFalse(fitting.is_model_current(model))
         self.cursor_context.assert_not_called()
 
-    def test_model_accepts_numeric_string_ids_and_normalizes_for_sql(self):
-        self.cursor.fetchone.return_value = {"consented_count": 2}
-        self.assertTrue(fitting.is_model_current({"outcome_ids": ["11", "12"]}))
+    def test_actual_training_artifact_manifest_is_current_until_withdrawal(self):
+        from recommender import train_model
+        from test_recommender import synthetic_outcomes
+
+        artifact = train_model(synthetic_outcomes())
+        self.assertTrue(all(type(identifier) is int for identifier in artifact["outcome_ids"]))
+        count = len(artifact["outcome_ids"])
+        self.cursor.fetchone.return_value = {"consented_count": count}
+        self.assertTrue(fitting.is_model_current(artifact))
         self.assertEqual(
             self.cursor.execute.call_args.args[1],
-            ([11, 12], fitting.CONSENT_VERSION),
+            (artifact["outcome_ids"], fitting.CONSENT_VERSION),
         )
+        self.cursor.fetchone.return_value = {"consented_count": count - 1}
+        self.assertFalse(fitting.is_model_current(artifact))
 
     def test_model_is_current_only_while_every_manifest_row_is_consented(self):
         model = {"outcome_ids": [11, 12, 13]}
@@ -292,6 +301,52 @@ class PersistenceTests(unittest.TestCase):
 
 
 class DatabaseTests(unittest.TestCase):
+    @patch("database.db.psycopg2.connect")
+    def test_every_connection_explicitly_uses_utc(self, connect):
+        with DatabaseConnection().get_connection():
+            pass
+        self.assertEqual(connect.call_args.kwargs["options"], "-c timezone=UTC")
+
+    @patch("database.db.db.get_cursor")
+    def test_price_observation_is_atomic_and_does_not_assume_stock(self, get_cursor):
+        cursor = get_cursor.return_value.__enter__.return_value
+        update_club_price(7, "399.99", "Retailer")
+        get_cursor.assert_called_once()
+        self.assertEqual(cursor.execute.call_count, 2)
+        query, params = cursor.execute.call_args_list[0].args
+        self.assertIn("price_checked_at = EXCLUDED.price_checked_at", query)
+        self.assertIn(
+            "CASE WHEN %s IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END", query)
+        self.assertEqual(params, (7, "Retailer", 399.99, None, None, 399.99))
+        refresh_query = cursor.execute.call_args_list[1].args[0]
+        self.assertIn("current_price, price_updated_at", refresh_query)
+        self.assertIn("in_stock IS TRUE", refresh_query)
+
+    @patch("database.db.db.get_cursor")
+    def test_availability_only_observation_has_no_fresh_price(self, get_cursor):
+        cursor = get_cursor.return_value.__enter__.return_value
+        update_club_price(7, None, "Retailer", in_stock=True)
+        params = cursor.execute.call_args_list[0].args[1]
+        self.assertIsNone(params[2])
+        self.assertTrue(params[3])
+        self.assertIsNone(params[-1])
+
+    @patch("database.db.db.get_cursor")
+    def test_price_observation_validation_precedes_transaction(self, get_cursor):
+        for price in (True, -1, float("nan"), float("inf"), {}):
+            with self.subTest(price=price):
+                with self.assertRaises(ValueError):
+                    update_club_price(7, price, "Retailer")
+        for in_stock in ("true", 1):
+            with self.subTest(in_stock=in_stock):
+                with self.assertRaises(ValueError):
+                    update_club_price(7, 399, "Retailer", in_stock=in_stock)
+        with self.assertRaises(ValueError):
+            update_club_price(7, 399, "")
+        with self.assertRaises(ValueError):
+            update_club_price(7, 399, "Retailer", product_url="javascript:alert(1)")
+        get_cursor.assert_not_called()
+
     @patch("database.db.db.get_cursor")
     def test_club_id_not_overwritten_by_specification(self, get_cursor):
         cursor = get_cursor.return_value.__enter__.return_value

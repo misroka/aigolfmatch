@@ -66,9 +66,11 @@ def _prepare(outcomes):
             raise ValueError(f"Outcome {index}: expected an object.")
         identifier = str(row.get("id", ""))
         if (not identifier.isascii() or not identifier.isdecimal()
-                or not 1 <= int(identifier) <= 9223372036854775807
-                or identifier in seen_ids):
+                or not 1 <= int(identifier) <= 9223372036854775807):
             raise ValueError(f"Outcome {index}: require a unique positive database id for consent revalidation.")
+        identifier = int(identifier)
+        if identifier in seen_ids:
+            raise ValueError(f"Outcome {index}: duplicate database outcome id.")
         seen_ids.add(identifier)
         when = timestamp(row.get("measured_at"))
         collected = timestamp(row.get("collected_at")) if "collected_at" in row else when
@@ -150,7 +152,7 @@ def train_model(outcomes):
         "residual_mae": evaluation["cold_golfer"]["model_mae"],
         "evaluation": evaluation, "quality_gate": "passed" if quality_passes(evaluation) else "failed",
         "training_club_ids": sorted(known_clubs),
-        "outcome_ids": sorted({int(row["id"]) for row in rows}),
+        "outcome_ids": sorted({row["id"] for row in rows}),
         "trained_at": now_iso(),
         "limitations": ["Observational proxy objective, not causal efficacy or a true best-club label.",
                         "Collection-time catalog snapshots may differ from the actual measured club configuration.",

@@ -204,7 +204,7 @@ def get_training_outcomes():
             FROM fitting_outcomes
             WHERE consent IS TRUE AND consented_at IS NOT NULL
                   AND consent_version = %s
-            ORDER BY measured_at, id
+            ORDER BY GREATEST(measured_at, collected_at), id
         """, (CONSENT_VERSION,))
         return [_plain(row) for row in cursor.fetchall()]
 
@@ -213,18 +213,12 @@ def is_model_current(model):
     """Fail closed if any training/evaluation outcome has lost its consent."""
     if not isinstance(model, Mapping):
         return False
-    manifest = model.get("outcome_ids")
-    if not isinstance(manifest, list) or not manifest:
-        return False
-    outcome_ids = []
-    for outcome_id in manifest:
-        if (isinstance(outcome_id, str) and len(outcome_id) <= 19
-                and outcome_id.isascii() and outcome_id.isdecimal()):
-            outcome_id = int(outcome_id)
-        if type(outcome_id) is not int or not 1 <= outcome_id <= 9223372036854775807:
-            return False
-        outcome_ids.append(outcome_id)
-    if len(set(outcome_ids)) != len(outcome_ids):
+    outcome_ids = model.get("outcome_ids")
+    if (not isinstance(outcome_ids, list) or not outcome_ids
+            or any(type(outcome_id) is not int
+                   or not 1 <= outcome_id <= 9223372036854775807
+                   for outcome_id in outcome_ids)
+            or len(set(outcome_ids)) != len(outcome_ids)):
         return False
     try:
         with db.get_cursor() as cursor:
