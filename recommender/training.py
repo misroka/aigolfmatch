@@ -59,20 +59,27 @@ def _ranking(rows, predictions, baseline):
 
 def _prepare(outcomes):
     rows = []
+    seen_ids = set()
     now = datetime.now(timezone.utc)
     for index, row in enumerate(outcomes):
         if not isinstance(row, dict):
             raise ValueError(f"Outcome {index}: expected an object.")
+        identifier = str(row.get("id", ""))
+        if (not identifier.isascii() or not identifier.isdecimal() or int(identifier) <= 0
+                or identifier in seen_ids):
+            raise ValueError(f"Outcome {index}: require a unique positive database id for consent revalidation.")
+        seen_ids.add(identifier)
         when = timestamp(row.get("measured_at"))
         carry, dispersion, shots = (number(row.get(key)) for key in ("carry_yards", "dispersion_yards", "shot_count"))
-        if (when is None or when > now or carry is None or not 0 <= carry <= 450
+        if (when is None or when > now or carry is None or not 0 <= carry <= 400
                 or dispersion is None or not 0 <= dispersion <= 150
-                or shots is None or shots != int(shots) or shots < 3):
-            raise ValueError(f"Outcome {index}: require aware past measured_at, carry 0–450, dispersion 0–150 and >=3 shots.")
+                or shots is None or shots != int(shots) or not 5 <= shots <= 500):
+            raise ValueError(f"Outcome {index}: require aware past measured_at, carry 0–400, dispersion 0–150 and 5–500 shots.")
         if (not isinstance(row.get("profile"), dict) or not isinstance(row.get("club"), dict)
                 or row.get("golfer_id") in (None, "") or row.get("club_id") in (None, "")):
             raise ValueError(f"Outcome {index}: require golfer_id, club_id and profile/club snapshots.")
         rows.append({
+            "id": identifier,
             "golfer_id": str(row["golfer_id"]), "club_id": str(row["club_id"]),
             "when": when, "values": features(row["profile"], row["club"]),
             "target": carry / 400 - dispersion / 150,
@@ -136,6 +143,7 @@ def train_model(outcomes):
         "residual_mae": evaluation["cold_golfer"]["model_mae"],
         "evaluation": evaluation, "quality_gate": "passed" if quality_passes(evaluation) else "failed",
         "training_club_ids": sorted(known_clubs),
+        "outcome_ids": sorted({row["id"] for row in rows}, key=int),
         "trained_at": now_iso(),
         "limitations": ["Observational proxy objective, not causal efficacy or a true best-club label.",
                         "Residual MAE is not a calibrated confidence interval."],

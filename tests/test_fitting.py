@@ -202,12 +202,13 @@ class PersistenceTests(unittest.TestCase):
 
     def test_training_uses_only_consented_snapshots_not_reviews_or_live_catalog(self):
         row = {
-            "profile": profile(), "club": club(), "golfer_id": str(uuid4()),
+            "id": 19, "profile": profile(), "club": club(), "golfer_id": str(uuid4()),
             "club_id": 7, "carry_yards": 230, "dispersion_yards": 20,
             "shot_count": 10, "measured_at": datetime(2025, 1, 1, tzinfo=timezone.utc),
         }
         self.cursor.fetchall.return_value = [row]
         result = fitting.get_training_outcomes()
+        self.assertEqual(result[0]["id"], 19)
         self.assertEqual(result[0]["club"]["loft_degrees"], 10.5)
         query, params = self.cursor.execute.call_args.args
         self.assertIn("club_snapshot AS club", query)
@@ -216,6 +217,36 @@ class PersistenceTests(unittest.TestCase):
         self.assertNotIn("JOIN", query)
         self.assertNotIn("review", query)
         self.assertEqual(params, (fitting.CONSENT_VERSION,))
+
+    def test_model_requires_valid_nonempty_unique_outcome_manifest(self):
+        for model in (
+            None, {}, {"outcome_ids": []}, {"outcome_ids": "1"},
+            {"outcome_ids": [True]}, {"outcome_ids": [1.0]},
+            {"outcome_ids": [1, 1]}, {"outcome_ids": [0]},
+            {"outcome_ids": [9223372036854775808]},
+        ):
+            with self.subTest(model=model):
+                self.assertFalse(fitting.is_model_current(model))
+        self.cursor_context.assert_not_called()
+
+    def test_model_is_current_only_while_every_manifest_row_is_consented(self):
+        model = {"outcome_ids": [11, 12, 13]}
+        self.cursor.fetchone.return_value = {"consented_count": 3}
+        self.assertTrue(fitting.is_model_current(model))
+        query, params = self.cursor.execute.call_args.args
+        self.assertIn("id = ANY(%s)", query)
+        self.assertIn("consent IS TRUE", query)
+        self.assertIn("consented_at IS NOT NULL", query)
+        self.assertEqual(params, ([11, 12, 13], fitting.CONSENT_VERSION))
+        self.cursor.fetchone.return_value = {"consented_count": 2}
+        self.assertFalse(fitting.is_model_current(model))
+        self.cursor.fetchone.return_value = {"consented_count": 0}
+        self.assertFalse(fitting.is_model_current(model))
+        self.assertEqual(self.cursor.execute.call_count, 3)
+
+    def test_model_fails_closed_on_database_outage(self):
+        self.cursor.execute.side_effect = RuntimeError("unavailable")
+        self.assertFalse(fitting.is_model_current({"outcome_ids": [11]}))
 
     def test_withdrawal_deletes_only_session_records(self):
         golfer = str(uuid4())

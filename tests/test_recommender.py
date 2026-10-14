@@ -40,6 +40,7 @@ def synthetic_outcomes():
             values = features(p, c)
             target = 0.85 - 0.60 * values[0] + 0.05 * values[3]
             rows.append({
+                "id": len(rows) + 1,
                 "profile": p, "club": c, "golfer_id": str(golfer), "club_id": str(c["id"]),
                 "measured_at": (start + timedelta(days=golfer)).isoformat(),
                 "carry_yards": (target + 0.1) * 400, "dispersion_yards": 15, "shot_count": 10,
@@ -51,6 +52,7 @@ class RecommendationTests(unittest.TestCase):
     def test_baseline_decomposition_and_cold_start(self):
         result = recommend(profile(), [club()])[0]
         self.assertEqual(result["method"], "baseline")
+        self.assertEqual(result["model_name"], "Fixture only")
         self.assertAlmostEqual(result["score"], result["baseline_value"] +
                                sum(item["contribution"] for item in result["contributions"]))
         self.assertEqual([x["feature"] for x in result["contributions"]], FEATURE_NAMES)
@@ -92,6 +94,13 @@ class RecommendationTests(unittest.TestCase):
         c["product_sources"][1]["price"] = 600
         self.assertEqual(recommend(profile(), [c]), [])
 
+    def test_price_check_timestamp_has_priority_over_scrape_timestamp(self):
+        c = club()
+        c["price_checked_at"] = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        self.assertEqual(recommend(profile(), [c]), [])
+        c["price_checked_at"] = None
+        self.assertEqual(recommend(profile(), [c]), [])
+
     def test_missing_specs_signed_penalty_and_ids_not_predictors(self):
         c = club()
         del c["shaft_flex"]
@@ -102,6 +111,15 @@ class RecommendationTests(unittest.TestCase):
         before = features(profile(), c)
         c.update(id=9999, brand_id=444, club_type_id=222)
         self.assertEqual(before, features(profile(), c))
+
+    def test_canonical_profile_loft_degrees(self):
+        p = profile()
+        del p["preferred_loft"]
+        p["loft_degrees"] = 10
+        self.assertEqual(features(p, club())[2], 1)
+        self.assertEqual(features(p, club())[6], 0)
+        p["loft_degrees"] = 30
+        self.assertEqual(features(p, club())[2], 0)
 
     def test_limit_and_deterministic_sort(self):
         self.assertEqual(len(recommend(profile(), [club(2), club(1)], limit=1)), 1)
@@ -132,10 +150,12 @@ class RecommendationTests(unittest.TestCase):
     def test_purges_earlier_measurements_of_holdout_golfers(self):
         rows = synthetic_outcomes()
         duplicate = copy.deepcopy(rows[-1])
+        duplicate["id"] = len(rows) + 1
         duplicate["measured_at"] = "2019-01-01T00:00:00+00:00"
         artifact = train_model(rows + [duplicate])
         self.assertGreaterEqual(artifact["evaluation"]["counts"]["purged_rows"], 1)
         self.assertEqual(artifact["evaluation"]["counts"]["overlapping_golfers"], 0)
+        self.assertEqual(set(artifact["outcome_ids"]), {str(row["id"]) for row in rows + [duplicate]})
 
     def test_weak_model_falls_back(self):
         rows = synthetic_outcomes()
@@ -156,8 +176,9 @@ class RecommendationTests(unittest.TestCase):
         self.assertEqual(artifact["quality_gate"], "failed")
 
     def test_invalid_outcomes_rejected(self):
-        for change in ({"carry_yards": float("nan")}, {"shot_count": 2},
-                       {"measured_at": "2020-01-01"}, {"club": None}):
+        for change in ({"carry_yards": float("nan")}, {"carry_yards": 401},
+                       {"shot_count": 4}, {"shot_count": 501},
+                       {"measured_at": "2020-01-01"}, {"club": None}, {"id": None}):
             rows = synthetic_outcomes()
             rows[0].update(change)
             with self.assertRaises(ValueError):
@@ -173,7 +194,8 @@ class RecommendationTests(unittest.TestCase):
             stat.return_value.st_size = 100
             self.assertEqual(load_model("local.json")["version"], 1)
         for change in ({"feature_names": ["club_id"]}, {"intercept": float("inf")},
-                       {"coefficients": [0]}, {"residual_mae": -1}):
+                       {"coefficients": [0]}, {"residual_mae": -1}, {"outcome_ids": []},
+                       {"outcome_ids": ["1"]}):
             invalid = dict(artifact, **change)
             with self.assertRaises(ValueError):
                 recommend(profile(), [club()], invalid)

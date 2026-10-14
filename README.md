@@ -99,10 +99,10 @@ python scripts/init_database.py
 ### Initial Data Load
 ```bash
 # Load brand data
-python scripts/load_brands.py
+python scripts/init_database.py
 
 # Scrape current inventory
-python scripts/scrape_retailers.py --all
+python scripts/scrape_retailers.py --source all
 
 # Load historical data
 python scripts/load_historical_data.py --years 10
@@ -113,9 +113,10 @@ python scripts/load_historical_data.py --years 10
 # Update prices and availability (run daily)
 python scripts/update_prices.py
 
-# Check for new releases (run weekly)
-python scripts/check_new_releases.py
 ```
+
+Schedule these commands through your deployment environment. Automated discovery
+of new releases is not implemented.
 
 ## Usage
 
@@ -188,7 +189,7 @@ aigolfmatch/
 │   └── retailer_scrapers/ # Retailer scrapers
 ├── scripts/
 │   ├── init_database.py   # Database initialization
-│   ├── load_brands.py     # Load brand data
+│   ├── migrate_recommendations.py # Upgrade existing databases
 │   ├── scrape_retailers.py # Run web scrapers
 │   └── update_prices.py   # Update pricing data
 ├── config/
@@ -196,7 +197,10 @@ aigolfmatch/
 ├── data/
 │   └── historical/        # Historical club data
 ├── models/
-│   └── club.py           # Data models
+│   └── club.py           # Catalogue dataclasses, not trained models
+├── recommender/          # Additive baseline, Ridge scoring, and evaluation
+├── web/                  # Catalogue administration and public fitting flow
+├── tests/                # Standard-library unittest regression suite
 └── requirements.txt       # Python dependencies
 ```
 

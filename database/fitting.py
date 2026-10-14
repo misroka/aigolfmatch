@@ -189,7 +189,7 @@ def get_training_outcomes():
     """Read only consented measurements, without joining mutable catalog data."""
     with db.get_cursor() as cursor:
         cursor.execute("""
-            SELECT profile, club_snapshot AS club, golfer_id::text AS golfer_id,
+            SELECT id, profile, club_snapshot AS club, golfer_id::text AS golfer_id,
                    golf_club_id AS club_id, measured_at,
                    carry_yards, dispersion_yards, shot_count
             FROM fitting_outcomes
@@ -198,6 +198,30 @@ def get_training_outcomes():
             ORDER BY measured_at, id
         """, (CONSENT_VERSION,))
         return [_plain(row) for row in cursor.fetchall()]
+
+
+def is_model_current(model):
+    """Fail closed if any training/evaluation outcome has lost its consent."""
+    if not isinstance(model, Mapping):
+        return False
+    outcome_ids = model.get("outcome_ids")
+    if (not isinstance(outcome_ids, list) or not outcome_ids
+            or any(type(outcome_id) is not int
+                   or not 1 <= outcome_id <= 9223372036854775807
+                   for outcome_id in outcome_ids)
+            or len(set(outcome_ids)) != len(outcome_ids)):
+        return False
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) AS consented_count
+                FROM fitting_outcomes
+                WHERE id = ANY(%s) AND consent IS TRUE
+                      AND consented_at IS NOT NULL AND consent_version = %s
+            """, (outcome_ids, CONSENT_VERSION))
+            return cursor.fetchone()["consented_count"] == len(outcome_ids)
+    except Exception:
+        return False
 
 
 def delete_fitting_outcomes(golfer_id):

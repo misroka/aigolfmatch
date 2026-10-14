@@ -6,6 +6,7 @@ Secure interface with authentication.
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
+from werkzeug.exceptions import HTTPException
 from functools import wraps
 import os
 from dotenv import load_dotenv
@@ -146,12 +147,18 @@ def login():
             login_user(user, remember=remember)
             
             next_page = request.args.get('next', '')
-            parsed = urlsplit(next_page)
-            if (parsed.scheme or parsed.netloc or not next_page.startswith('/') or
-                    next_page.startswith('//') or '\\' in next_page or
-                    any(ord(char) < 32 for char in next_page)):
-                next_page = None
-            return redirect(next_page if next_page else url_for('index'))
+            destination = url_for('index')
+            if (next_page.startswith('/') and not next_page.startswith('//') and '\\' not in next_page and
+                    not any(ord(char) < 32 for char in next_page)):
+                try:
+                    parsed = urlsplit(next_page)
+                    endpoint, values = app.url_map.bind('').match(parsed.path, method='GET')
+                    if endpoint in {'index', 'clubs', 'club_detail', 'brands', 'profiles',
+                                    'search', 'recommendation_page'}:
+                        destination = url_for(endpoint, **values)
+                except (HTTPException, ValueError):
+                    pass
+            return redirect(destination)
         else:
             flash('Invalid username or password', 'error')
     
@@ -205,10 +212,12 @@ def api_recommendations():
                         'ml' if model else 'baseline')
         return jsonify(recommendations=results,
                        notice='Suggestions are not a professional fitting or evidence of causal improvement.')
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
+    except ValueError:
+        return jsonify(error='Invalid questionnaire. Check the required fields and allowed ranges.'), 400
+    except HTTPException:
+        raise
     except Exception:
-        app.logger.exception('Recommendation service failed.')
+        app.logger.error('Recommendation service failed.')
         return jsonify(error='Recommendation service temporarily unavailable.'), 503
 
 
@@ -220,7 +229,7 @@ def api_outcomes():
             count = delete_fitting_outcomes(golfer_id) if golfer_id else 0
             return jsonify(deleted=count)
         except Exception:
-            app.logger.exception('Outcome withdrawal failed.')
+            app.logger.error('Outcome withdrawal failed.')
             return jsonify(error='Feedback service temporarily unavailable.'), 503
     try:
         payload = json_payload()
@@ -229,10 +238,12 @@ def api_outcomes():
         payload['golfer_id'] = session['golfer_id']
         outcome_id = save_fitting_outcome(validate_outcome(payload))
         return jsonify(id=outcome_id), 201
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
+    except ValueError:
+        return jsonify(error='Invalid feedback or missing consent. Check measurements, timestamp and club compatibility.'), 400
+    except HTTPException:
+        raise
     except Exception:
-        app.logger.exception('Outcome collection failed.')
+        app.logger.error('Outcome collection failed.')
         return jsonify(error='Feedback service temporarily unavailable.'), 503
 
 
@@ -498,6 +509,11 @@ def api_stats():
 def not_found(error):
     """404 error handler."""
     return render_template('404.html'), 404
+
+
+@app.errorhandler(413)
+def request_too_large(error):
+    return jsonify(error='Request exceeds the 16 KiB limit.'), 413
 
 
 @app.errorhandler(500)

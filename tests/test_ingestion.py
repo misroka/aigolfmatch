@@ -206,6 +206,16 @@ class ScraperTests(unittest.TestCase):
         with patch.object(self.scraper, 'fetch_page', return_value=None):
             self.assertIsNone(self.scraper.scrape_club_details('https://example.org/p'))
 
+    def test_fetch_uses_installed_lxml_parser_without_network(self):
+        response = MagicMock()
+        response.content = b'<meta itemprop="price" content="249.99">'
+        self.scraper.request_delay = 0
+        with patch.object(self.scraper.session, 'get', return_value=response), patch(
+                'scrapers.base_scraper.time.sleep'):
+            details = self.scraper.scrape_club_details('https://example.org/p')
+        self.assertEqual(details['price'], 249.99)
+        self.assertIsNone(details['in_stock'])
+
 
 class PriceUpdateTests(unittest.TestCase):
     def test_missing_price_not_success_and_out_of_stock_clears_cache(self):
@@ -229,6 +239,11 @@ class PriceUpdateTests(unittest.TestCase):
 
 
 class MigrationTests(unittest.TestCase):
+    def test_real_fitting_schema_matches_canonical_file(self):
+        from pathlib import Path
+        canonical = (Path(__file__).parent.parent / 'database' / 'fitting_schema.sql').read_text()
+        self.assertEqual(migration.fitting_schema().strip(), canonical.strip())
+
     def test_only_new_fitting_schema_is_replayed_idempotently(self):
         schema = """CREATE TABLE brands (id INTEGER);
 -- Fitting outcome tables

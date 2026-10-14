@@ -62,7 +62,7 @@ def features(profile, club, price=None):
     speed = number(profile.get("swing_speed_mph"))
     flex = FLEX.get(text(specs.get("shaft_flex", club.get("shaft_flex"))))
     loft = number(specs.get("loft_degrees", club.get("loft_degrees")))
-    preferred = number(profile.get("preferred_loft", profile.get("loft_preference")))
+    preferred = number(profile.get("loft_degrees", profile.get("preferred_loft", profile.get("loft_preference"))))
     budget = number(profile.get("budget"))
     price = number(price if price is not None else club.get("price", club.get("current_price")))
     missing = [
@@ -134,6 +134,12 @@ def validate_model(model):
         not isinstance(v, str) for v in model["training_club_ids"]
     ):
         raise ValueError("Invalid training club metadata.")
+    outcome_ids = model.get("outcome_ids")
+    if (not isinstance(outcome_ids, list) or not outcome_ids
+            or any(not isinstance(v, str) or not v.isascii() or not v.isdecimal() or int(v) <= 0
+                   for v in outcome_ids)
+            or len(outcome_ids) != len(set(outcome_ids))):
+        raise ValueError("Model requires a unique positive outcome_ids consent-revalidation manifest.")
     evaluation = model.get("evaluation")
     if not isinstance(evaluation, dict):
         raise ValueError("Missing evaluation evidence.")
@@ -161,6 +167,8 @@ def validate_model(model):
             raise ValueError("Residual uncertainty must equal the heldout MAE.")
         if evaluation["cold_golfer"]["rows"] != evaluation["counts"]["test_rows"]:
             raise ValueError("Inconsistent holdout row counts.")
+        if len(outcome_ids) != sum(evaluation["counts"][key] for key in ("train_rows", "test_rows", "purged_rows")):
+            raise ValueError("Outcome manifest must cover every training, evaluation and purged record.")
     except (KeyError, TypeError) as exc:
         raise ValueError("Incomplete evaluation schema.") from exc
     if model.get("quality_gate") not in ("passed", "failed"):
@@ -200,7 +208,7 @@ def _eligible_offer(profile, club, now):
         if not isinstance(offer, dict):
             continue
         price = number(offer.get("price"))
-        checked = timestamp(offer.get("checked_at", offer.get("price_checked_at", offer.get("last_checked"))))
+        checked = timestamp(offer.get("price_checked_at", offer.get("checked_at", offer.get("last_checked"))))
         if (offer.get("in_stock") is True and price is not None and 0 <= price <= budget
                 and checked is not None and timedelta(0) <= now - checked <= timedelta(hours=24)):
             eligible.append((price, offer))
@@ -245,6 +253,9 @@ def recommend(profile, candidates, model=None, limit=5):
             limitations.append("Cold-start club: no training outcome coverage; generalization is unverified.")
         results.append({
             "id": club.get("id"), "club": dict(club), "price": price,
+            "brand_name": club.get("brand_name"), "model_name": club.get("model_name"),
+            "club_type_name": club.get("club_type_name", club.get("club_type")),
+            "hand": club.get("hand"),
             "source_name": source.get("source_name"),
             "score": intercept + sum(item["contribution"] for item in contributions),
             "method": "supervised_ridge" if trained else "baseline",
