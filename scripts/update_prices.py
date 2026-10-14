@@ -2,13 +2,13 @@
 
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.db import db, log_scrape
 from scrapers.retailer_scrapers.globalgolf_scraper import GlobalGolfScraper
+from database.validation import number, stock, refresh_current_price
 
 
 def update_prices_from_source(scraper, source_name: str):
@@ -24,8 +24,6 @@ def update_prices_from_source(scraper, source_name: str):
     
     try:
         # Get all product sources that need updating (older than 1 day)
-        cutoff_time = datetime.now() - timedelta(days=1)
-        
         with db.get_cursor() as cursor:
             cursor.execute(
                 """
@@ -34,11 +32,12 @@ def update_prices_from_source(scraper, source_name: str):
                 JOIN golf_clubs gc ON ps.golf_club_id = gc.id
                 JOIN brands b ON gc.brand_id = b.id
                 WHERE ps.source_name = %s 
-                AND ps.last_checked < %s
-                ORDER BY ps.last_checked ASC
+                AND (ps.last_checked IS NULL
+                     OR ps.last_checked < CURRENT_TIMESTAMP - INTERVAL '1 day')
+                ORDER BY ps.last_checked ASC NULLS FIRST
                 LIMIT 100
                 """,
-                (source_name, cutoff_time)
+                (source_name,)
             )
             sources = cursor.fetchall()
         
@@ -49,33 +48,31 @@ def update_prices_from_source(scraper, source_name: str):
                 # Scrape updated details
                 details = scraper.scrape_club_details(source['product_url'])
                 
-                if details and 'price' in details:
-                    # Update price
+                if details is not None:
+                    price = number(details.get('price'))
+                    availability = stock(details.get('in_stock'))
+                    if price is None and availability is None:
+                        raise ValueError("No price or availability observed")
                     with db.get_cursor() as cursor:
                         cursor.execute(
                             """
                             UPDATE product_sources
                             SET price = %s, 
                                 in_stock = %s,
-                                last_checked = CURRENT_TIMESTAMP
+                                last_checked = CURRENT_TIMESTAMP,
+                                price_checked_at = CASE WHEN %s::numeric IS NOT NULL
+                                    THEN CURRENT_TIMESTAMP ELSE NULL END
                             WHERE id = %s
                             """,
-                            (details['price'], details.get('in_stock', True), source['id'])
+                            (price, availability, price, source['id'])
                         )
                         
-                        # Also update main club price
-                        cursor.execute(
-                            """
-                            UPDATE golf_clubs
-                            SET current_price = %s,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = %s
-                            """,
-                            (details['price'], source['golf_club_id'])
-                        )
+                        refresh_current_price(cursor, source['golf_club_id'])
                     
                     updated += 1
-                    print(f"Updated: {source['brand_name']} {source['model_name']} - ${details['price']}")
+                    print(f"Updated: {source['brand_name']} {source['model_name']}")
+                else:
+                    raise ValueError("Product fetch failed")
                 
             except Exception as e:
                 print(f"Error updating {source['model_name']}: {str(e)}")
@@ -85,7 +82,7 @@ def update_prices_from_source(scraper, source_name: str):
         log_scrape(
             source_name=source_name,
             scrape_type="update_prices",
-            status="success" if errors < len(sources) / 2 else "partial",
+            status="success" if errors == 0 else "partial",
             records_added=0,
             records_updated=updated,
             error_message=f"{errors} errors" if errors > 0 else None
@@ -101,7 +98,7 @@ def update_prices_from_source(scraper, source_name: str):
             status="failed",
             error_message=str(e)
         )
-        return 0, 0
+        return 0, 1
 
 
 def main():

@@ -35,6 +35,7 @@ Thumbs.db
 # Data
 data/scraped/
 data/cache/
+artifacts/
 
 # Selenium
 chromedriver

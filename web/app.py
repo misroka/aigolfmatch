@@ -3,15 +3,21 @@ Flask web application for golf club database management.
 Secure interface with authentication.
 """
 
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash, abort
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.security import check_password_hash
 from functools import wraps
 import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
+import secrets
+import time
+from collections import OrderedDict, deque
+from threading import Lock
+from urllib.parse import urlsplit
+from uuid import uuid4
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,12 +26,80 @@ from database.db import (
     get_clubs, get_brands, get_club_types, get_club_by_id,
     get_reviewer_profiles, get_reviews_with_profiles, db
 )
+from database.fitting import (
+    validate_profile, validate_outcome, get_recommendation_candidates,
+    save_fitting_outcome, delete_fitting_outcomes, get_recommendation_health,
+    is_model_current
+)
+from recommender import recommend, load_model
 
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', os.urandom(24).hex())
+production = os.getenv('APP_ENV', 'development') == 'production'
+secret_key = os.getenv('SECRET_KEY')
+if production and (not secret_key or len(secret_key) < 32 or
+                   not os.getenv('ADMIN_PASSWORD_HASH')):
+    raise RuntimeError('Production requires SECRET_KEY (at least 32 characters) and ADMIN_PASSWORD_HASH.')
+app.config['SECRET_KEY'] = secret_key or secrets.token_hex(32)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=production, REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SECURE=production, REMEMBER_COOKIE_SAMESITE='Lax',
+    MAX_CONTENT_LENGTH=16 * 1024
+)
+_request_windows = OrderedDict()
+_request_lock = Lock()
+
+
+def csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_urlsafe(32)
+    return session['csrf_token']
+
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+
+@app.before_request
+def protect_requests():
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        provided = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token', '')
+        expected = session.get('csrf_token', '')
+        if not expected or not secrets.compare_digest(expected, provided):
+            abort(400, description='Missing or invalid CSRF token.')
+    if request.endpoint in {'login', 'api_recommendations', 'api_outcomes'}:
+        if request.method not in {'POST', 'DELETE'}:
+            return
+        key = (request.remote_addr, request.endpoint)
+        now = time.monotonic()
+        with _request_lock:
+            window = _request_windows.setdefault(key, deque())
+            _request_windows.move_to_end(key)
+            while window and window[0] <= now - 60:
+                window.popleft()
+            if len(window) >= 20:
+                return jsonify(error='Too many requests. Try again in one minute.'), 429, {'Retry-After': '60'}
+            window.append(now)
+            while len(_request_windows) > 10000:
+                _request_windows.popitem(last=False)
+
+
+@app.after_request
+def security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'same-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    )
+    if request.endpoint != 'static':
+        response.headers['Cache-Control'] = 'no-store'
+    if production:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000'
+    return response
 
 # Flask-Login setup
 login_manager = LoginManager()
@@ -44,8 +118,7 @@ class User(UserMixin):
 # Simple in-memory user store (for single user)
 # In production, use a proper database
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD_HASH = os.getenv('ADMIN_PASSWORD_HASH', 
-                                 generate_password_hash('changeme123'))
+ADMIN_PASSWORD_HASH = os.getenv('ADMIN_PASSWORD_HASH')
 
 
 @login_manager.user_loader
@@ -67,11 +140,17 @@ def login():
         password = request.form.get('password')
         remember = request.form.get('remember', False)
         
-        if username == ADMIN_USERNAME and check_password_hash(ADMIN_PASSWORD_HASH, password):
+        if (ADMIN_PASSWORD_HASH and username == ADMIN_USERNAME and password and
+                check_password_hash(ADMIN_PASSWORD_HASH, password)):
             user = User('1', username)
             login_user(user, remember=remember)
             
-            next_page = request.args.get('next')
+            next_page = request.args.get('next', '')
+            parsed = urlsplit(next_page)
+            if (parsed.scheme or parsed.netloc or not next_page.startswith('/') or
+                    next_page.startswith('//') or '\\' in next_page or
+                    any(ord(char) < 32 for char in next_page)):
+                next_page = None
             return redirect(next_page if next_page else url_for('index'))
         else:
             flash('Invalid username or password', 'error')
@@ -79,13 +158,102 @@ def login():
     return render_template('login.html')
 
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 @login_required
 def logout():
     """Logout user."""
     logout_user()
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
+
+
+@app.route('/recommend')
+def recommendation_page():
+    if 'golfer_id' not in session:
+        session['golfer_id'] = str(uuid4())
+    return render_template('recommend.html')
+
+
+def json_payload():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ValueError('A JSON object is required.')
+    return payload
+
+
+@app.route('/api/recommendations', methods=['POST'])
+def api_recommendations():
+    started = time.monotonic()
+    try:
+        profile = validate_profile(json_payload())
+        candidates = get_recommendation_candidates(profile['club_type'])
+        model = None
+        model_path = os.getenv('RECOMMENDER_MODEL_PATH')
+        if model_path:
+            try:
+                model = load_model(model_path)
+                if model is not None and model.get('quality_gate') != 'passed':
+                    model = None
+                if model is not None and not is_model_current(model):
+                    model = None
+                    app.logger.warning('Model consent manifest invalid; using baseline.')
+            except (ValueError, OSError):
+                app.logger.warning('Recommendation model unavailable; using baseline.')
+        results = recommend(profile, candidates, model=model, limit=5)
+        app.logger.info('recommendations count=%d latency_ms=%.1f model=%s',
+                        len(results), (time.monotonic() - started) * 1000,
+                        'ml' if model else 'baseline')
+        return jsonify(recommendations=results,
+                       notice='Suggestions are not a professional fitting or evidence of causal improvement.')
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        app.logger.exception('Recommendation service failed.')
+        return jsonify(error='Recommendation service temporarily unavailable.'), 503
+
+
+@app.route('/api/outcomes', methods=['POST', 'DELETE'])
+def api_outcomes():
+    if request.method == 'DELETE':
+        golfer_id = session.get('golfer_id')
+        try:
+            count = delete_fitting_outcomes(golfer_id) if golfer_id else 0
+            return jsonify(deleted=count)
+        except Exception:
+            app.logger.exception('Outcome withdrawal failed.')
+            return jsonify(error='Feedback service temporarily unavailable.'), 503
+    try:
+        payload = json_payload()
+        if 'golfer_id' not in session:
+            session['golfer_id'] = str(uuid4())
+        payload['golfer_id'] = session['golfer_id']
+        outcome_id = save_fitting_outcome(validate_outcome(payload))
+        return jsonify(id=outcome_id), 201
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        app.logger.exception('Outcome collection failed.')
+        return jsonify(error='Feedback service temporarily unavailable.'), 503
+
+
+@app.route('/health')
+def health():
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute('SELECT 1')
+        return jsonify(status='ok')
+    except Exception:
+        return jsonify(status='unavailable'), 503
+
+
+@app.route('/api/recommendation-health')
+@login_required
+def recommendation_health():
+    try:
+        summary = get_recommendation_health()
+        return jsonify(summary), 200 if summary.get('database_available') else 503
+    except Exception:
+        return jsonify(error='Monitoring temporarily unavailable.'), 503
 
 
 @app.route('/')
@@ -343,5 +511,5 @@ if __name__ == '__main__':
     app.run(
         host='127.0.0.1',  # Only accessible from localhost
         port=5000,
-        debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+        debug=not production and os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     )

@@ -18,7 +18,11 @@
                 <li><a href="{{ url_for('brands') }}">Brands</a></li>
                 <li><a href="{{ url_for('profiles') }}">Profiles</a></li>
                 <li><a href="{{ url_for('search') }}">Search</a></li>
-                <li><a href="{{ url_for('logout') }}" class="logout">Logout</a></li>
+                <li><a href="{{ url_for('recommendation_page') }}">Get fitted</a></li>
+                <li><form method="POST" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn">Logout</button>
+                </form></li>
             </ul>
         </div>
     </nav>
@@ -30,7 +34,7 @@
                 {% for category, message in messages %}
                     <div class="alert alert-{{ category }}">
                         {{ message }}
-                        <button class="alert-close" onclick="this.parentElement.remove()">×</button>
+                        <button class="alert-close" type="button" aria-label="Dismiss alert">×</button>
                     </div>
                 {% endfor %}
             {% endif %}

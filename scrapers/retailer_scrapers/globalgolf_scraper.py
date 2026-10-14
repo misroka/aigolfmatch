@@ -1,7 +1,11 @@
 """Example scraper for Global Golf website."""
 
 from typing import List, Dict, Any, Optional
+import json
+from datetime import datetime
+from urllib.parse import urljoin
 from scrapers.base_scraper import BaseScraper
+from database.validation import release_year
 
 
 class GlobalGolfScraper(BaseScraper):
@@ -92,7 +96,11 @@ class GlobalGolfScraper(BaseScraper):
             
             # Extract product URL
             link_elem = product_element.find('a', class_='product-link')
-            product_url = f"{self.BASE_URL}{link_elem['href']}" if link_elem else None
+            product_url = urljoin(self.BASE_URL, link_elem['href']) if link_elem else None
+            year_elem = product_element.select_one('[itemprop="releaseDate"], .release-year')
+            year = self._release_year(
+                product_element.get('data-release-year') or
+                (year_elem.get('content') or year_elem.get_text() if year_elem else None))
             
             return {
                 'source': self.source_name,
@@ -101,12 +109,66 @@ class GlobalGolfScraper(BaseScraper):
                 'club_type': category,
                 'price': price,
                 'url': product_url,
-                'in_stock': True  # Assume in stock if listed
+                'year': year,
+                'in_stock': self._availability(product_element)
             }
         
         except Exception as e:
             self.logger.error(f"Error extracting club data: {str(e)}")
             return None
+
+    @staticmethod
+    def _release_year(value):
+        try:
+            if isinstance(value, str) and len(value) >= 10:
+                value = datetime.fromisoformat(value.replace('Z', '+00:00')).year
+            return release_year(value)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _stock_value(value):
+        if not isinstance(value, str):
+            return None
+        value = value.rstrip('/').split('/')[-1].lower()
+        if value in ('instock', 'in stock', 'limitedavailability'):
+            return True
+        if value in ('outofstock', 'out of stock', 'soldout', 'sold out', 'discontinued'):
+            return False
+        return None
+
+    def _availability(self, element):
+        availability = element.select_one('[itemprop="availability"], .availability')
+        if availability is None:
+            return None
+        return self._stock_value(availability.get('href') or availability.get('content')
+                                 or self.clean_text(availability.get_text()))
+
+    def _offers(self, soup):
+        """Read explicit product offers; fixture-tested, not live-site verified."""
+        offers = []
+        for script in soup.select('script[type="application/ld+json"]'):
+            try:
+                data = json.loads(script.string or script.get_text())
+            except (ValueError, TypeError):
+                continue
+            nodes = data if isinstance(data, list) else [data]
+            for node in nodes:
+                if not isinstance(node, dict):
+                    continue
+                nodes.extend(node.get('@graph', []) if isinstance(node.get('@graph'), list) else [])
+                types = node.get('@type', [])
+                types = [types] if isinstance(types, str) else types
+                if 'Product' not in types:
+                    continue
+                product_offers = node.get('offers', [])
+                product_offers = product_offers if isinstance(product_offers, list) else [product_offers]
+                offers.extend(offer for offer in product_offers if isinstance(offer, dict))
+        # Multiple variants are ambiguous: do not merge a cheap variant's price
+        # with a different variant's stock status.
+        if not offers:
+            return None
+        return offers[0] if len(offers) == 1 else {}
     
     def scrape_club_details(self, club_url: str) -> Optional[Dict[str, Any]]:
         """
@@ -124,9 +186,29 @@ class GlobalGolfScraper(BaseScraper):
         
         try:
             details = {
+                'source': self.source_name,
                 'url': club_url,
-                'specifications': {}
+                'specifications': {},
+                'price': None,
+                'in_stock': None,
             }
+            structured_offer = self._offers(soup)
+            offer = structured_offer or {}
+            currency = offer.get('priceCurrency')
+            if currency in (None, 'USD'):
+                details['price'] = self.extract_price(offer.get('price'))
+            details['in_stock'] = self._stock_value(offer.get('availability'))
+            price_elem = soup.select_one('[itemprop="price"], .product-price, span.price')
+            if details['price'] is None and structured_offer is None and price_elem:
+                currency_elem = soup.select_one('[itemprop="priceCurrency"]')
+                currency = currency_elem.get('content') if currency_elem else None
+                if currency in (None, 'USD'):
+                    details['price'] = self.extract_price(price_elem.get('content') or price_elem.get_text())
+            if details['in_stock'] is None and structured_offer is None:
+                details['in_stock'] = self._availability(soup)
+            year_elem = soup.select_one('[itemprop="releaseDate"], .release-year')
+            details['year'] = self._release_year(
+                year_elem.get('content') or year_elem.get_text() if year_elem else None)
             
             # Extract title and description
             title_elem = soup.find('h1', class_='product-title')
@@ -151,7 +233,10 @@ class GlobalGolfScraper(BaseScraper):
             # Extract rating
             rating_elem = soup.find('span', class_='rating-value')
             if rating_elem:
-                details['rating'] = float(rating_elem.get_text())
+                try:
+                    details['rating'] = float(rating_elem.get_text())
+                except ValueError:
+                    pass
             
             # Extract number of reviews
             reviews_elem = soup.find('span', class_='review-count')

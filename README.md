@@ -57,7 +57,7 @@ The system collects data from:
 
 ### Prerequisites
 ```bash
-# Python 3.9+
+# Python 3.10+
 python --version
 
 # PostgreSQL 13+
@@ -133,34 +133,47 @@ taylormade_clubs = get_clubs(brand='TaylorMade', year_min=2020)
 beginner_clubs = get_clubs(skill_level='Beginner')
 ```
 
-### Recommender System (Coming Soon)
-```python
-from recommender import GolfClubRecommender
+### Explainable fitting recommendations
 
-recommender = GolfClubRecommender()
+Start `python web/app.py` and open `http://127.0.0.1:5000/recommend`.
+The public questionnaire returns up to five options with signed score contributions,
+uncertainty, and data limitations. Existing catalogue/admin pages remain authenticated.
 
-# Create user profile
-user_profile = {
-    'handicap': 14.0,
-    'swing_speed_mph': 92,
-    'skill_level': 'Intermediate',
-    'ball_flight': 'Slight Fade',
-    'budget': 1500
-}
+Recommendations enforce club type, handedness, budget, explicitly known stock, and
+prices checked within 24 hours. Unknown or stale offers are excluded rather than
+guessed; the bundled historical sample alone will not produce eligible offers.
+Scraper selectors still require verification against permitted real sources.
 
-# Get personalized recommendations
-recommendations = recommender.recommend(
-    user_profile=user_profile,
-    club_type='Iron Set'
-)
+The default is an explicit heuristic baseline, not a trained ML model. Optional
+consented, pseudonymous measured fitting feedback supplies training labels; reviews
+are not fitting outcomes. The experimental target is `carry_yards / 400 -
+dispersion_yards / 150`, rewarding carry and penalizing lateral dispersion under
+comparable conditions. It is not a universal definition of “best,” especially for
+putters or target-distance irons/wedges. Prefer a professional fitting for actual
+equipment decisions; do not interpret contributions as causal performance gains.
 
-# Recommendations are based on reviews from similar players
-for rec in recommendations:
-    print(f"{rec['brand']} {rec['model']} - ${rec['price']}")
-    print(f"  Rating from similar players: {rec['similar_player_rating']}/5.0")
+For an existing database, apply the idempotent migration before using these features:
+
+```bash
+python scripts/migrate_recommendations.py
 ```
 
-See `docs/REVIEWER_PROFILES.md` for details on personalized recommendations.
+For a fresh database, use `database/schema.sql` as in Setup. Train from genuinely
+collected measurements (no synthetic or review-derived labels):
+
+```bash
+python scripts/train_recommender.py --output artifacts/recommender.json
+```
+
+Set `RECOMMENDER_MODEL_PATH` to that local JSON artifact. Training uses a time-ordered,
+golfer-disjoint holdout, comparison with the baseline, and cold-start reporting.
+Insufficient evidence or a failed quality gate leaves baseline serving in place.
+JSON artifacts contain evaluation metadata and an outcome-ID consent manifest;
+never load model paths supplied by a client. No pre-trained validated model is shipped.
+
+Feedback withdrawal deletes this browser session's records and invalidates affected
+model serving. Operators must remove affected exported artifacts/backups and retrain.
+See `docs/WEB_INTERFACE.md` for API, privacy, testing, and deployment details.
 
 ## Project Structure
 
@@ -213,7 +226,9 @@ MIT License
 - [x] Brand and data source identification
 - [ ] Implement web scrapers
 - [ ] Historical data collection
-- [ ] Data validation pipeline
-- [ ] Recommender algorithm
-- [ ] API development
-- [ ] Web interface
+- [x] Ingestion validation and source/price tracking
+- [x] Constraint-aware baseline and evaluated ML training pipeline
+- [x] Signed local score explanations and fitting feedback API
+- [x] Golfer questionnaire and comparison interface
+- [ ] Verify production scraper selectors and expand measured fitting data
+- [ ] Validate recommendation quality with representative real-world outcomes

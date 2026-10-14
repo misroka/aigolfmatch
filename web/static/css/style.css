@@ -627,3 +627,28 @@ h3 {
         grid-column: 1;
     }
 }
+/* Fitting questionnaire and side-by-side recommendation comparison */
+#fitting-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.fitting-card {
+    background: white;
+    border: 1px solid #cbd5e0;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-wrap: anywhere;
+}
+
+.fitting-card label {
+    display: block;
+    margin: 0.75rem 0;
+}
+
+.fitting-card input[type="number"] {
+    display: block;
+    width: 100%;
+}

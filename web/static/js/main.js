@@ -3,6 +3,9 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Auto-dismiss alerts after 5 seconds
     const alerts = document.querySelectorAll('.alert');
+    document.querySelectorAll('.alert-close').forEach(button => {
+        button.addEventListener('click', () => button.parentElement.remove());
+    });
     alerts.forEach(alert => {
         setTimeout(() => {
             alert.style.opacity = '0';

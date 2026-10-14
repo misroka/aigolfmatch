@@ -10,14 +10,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scrapers.retailer_scrapers.globalgolf_scraper import GlobalGolfScraper
 from database.db import db, log_scrape
-from models.club import GolfClub
+from database.validation import (
+    number, release_year, source_url, stock, refresh_current_price,
+    specifications, SPEC_RANGES, SPEC_TEXT,
+)
+from psycopg2.extras import Json
 
 
-def get_or_create_brand_id(brand_name: str) -> Optional[int]:
+def get_or_create_brand_id(brand_name: str, cursor=None) -> Optional[int]:
     """Get brand ID or create if doesn't exist."""
-    with db.get_cursor() as cursor:
+    if cursor is None:
+        with db.get_cursor() as own_cursor:
+            return get_or_create_brand_id(brand_name, own_cursor)
+    else:
         # Try to find existing brand
-        cursor.execute("SELECT id FROM brands WHERE name ILIKE %s", (brand_name,))
+        cursor.execute("SELECT id FROM brands WHERE LOWER(name) = LOWER(%s)", (brand_name,))
         result = cursor.fetchone()
         
         if result:
@@ -31,7 +38,7 @@ def get_or_create_brand_id(brand_name: str) -> Optional[int]:
         return cursor.fetchone()['id']
 
 
-def get_club_type_id(club_type: str) -> Optional[int]:
+def get_club_type_id(club_type: str, cursor=None) -> Optional[int]:
     """Get club type ID."""
     # Normalize club type name
     type_mapping = {
@@ -45,7 +52,10 @@ def get_club_type_id(club_type: str) -> Optional[int]:
     
     normalized_type = type_mapping.get(club_type.lower(), club_type.title())
     
-    with db.get_cursor() as cursor:
+    if cursor is None:
+        with db.get_cursor() as own_cursor:
+            return get_club_type_id(club_type, own_cursor)
+    else:
         cursor.execute("SELECT id FROM club_types WHERE name = %s", (normalized_type,))
         result = cursor.fetchone()
         return result['id'] if result else None
@@ -61,92 +71,75 @@ def import_clubs(clubs: List[dict], source_name: str) -> tuple[int, int]:
     added = 0
     updated = 0
     
-    for club_data in clubs:
-        try:
-            # Get or create brand
-            brand_id = get_or_create_brand_id(club_data['brand'])
-            if not brand_id:
+    with db.get_cursor() as cursor:
+        for club_data in clubs:
+            try:
+                year = release_year(club_data.get('year', club_data.get('year_released')))
+                if year is None:
+                    continue
+                brand = club_data['brand'].strip()
+                model = club_data['model'].strip()
+                club_type = club_data['club_type'].strip()
+                if not brand or not model:
+                    raise ValueError("Brand and model are required")
+                url = source_url(club_data.get('url'))
+                price = number(club_data.get('price'))
+                availability = stock(club_data.get('in_stock'))
+                variants = specifications(club_data.get('specs', {}))
+            except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                print(f"Skipping invalid club: {exc}")
                 continue
-            
-            # Get club type
-            club_type_id = get_club_type_id(club_data['club_type'])
+            brand_id = get_or_create_brand_id(brand, cursor)
+            club_type_id = get_club_type_id(club_type, cursor)
             if not club_type_id:
                 continue
-            
-            # Check if club already exists
-            with db.get_cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT id FROM golf_clubs 
-                    WHERE brand_id = %s AND model_name = %s
-                    """,
-                    (brand_id, club_data['model'])
-                )
-                existing = cursor.fetchone()
-            
+            cursor.execute(
+                """SELECT id FROM golf_clubs
+                   WHERE brand_id = %s AND model_name = %s AND year_released = %s""",
+                (brand_id, model, year),
+            )
+            existing = cursor.fetchone()
             if existing:
-                # Update price
                 club_id = existing['id']
-                if club_data.get('price'):
-                    with db.get_cursor() as cursor:
-                        cursor.execute(
-                            """
-                            UPDATE golf_clubs 
-                            SET current_price = %s, updated_at = CURRENT_TIMESTAMP
-                            WHERE id = %s
-                            """,
-                            (club_data['price'], club_id)
-                        )
-                    updated += 1
+                updated += 1
             else:
-                # Insert new club
-                with db.get_cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO golf_clubs
+                       (brand_id, club_type_id, model_name, year_released, source_name, source_url)
+                       VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (brand_id, club_type_id, model, year, source_name, url),
+                )
+                club_id = cursor.fetchone()['id']
+                added += 1
+            cursor.execute(
+                """
+                INSERT INTO product_sources
+                    (golf_club_id, source_name, product_url, price, in_stock, price_checked_at)
+                VALUES (%s, %s, %s, %s, %s,
+                        CASE WHEN %s::numeric IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END)
+                ON CONFLICT (golf_club_id, source_name) DO UPDATE
+                SET product_url = EXCLUDED.product_url, price = EXCLUDED.price,
+                    in_stock = EXCLUDED.in_stock, last_checked = CURRENT_TIMESTAMP,
+                    price_checked_at = EXCLUDED.price_checked_at
+                """, (club_id, source_name, url, price, availability, price),
+            )
+            if variants:
+                # Replace only this source's observations, preserving other provenance.
+                cursor.execute(
+                    "DELETE FROM club_specifications WHERE golf_club_id = %s AND source_name = %s",
+                    (club_id, source_name),
+                )
+                fields = list(SPEC_RANGES) + list(SPEC_TEXT)
+                columns = ['golf_club_id'] + fields + ['source_name', 'source_url', 'validated', 'raw_specs']
+                for variant in variants:
                     cursor.execute(
-                        """
-                        INSERT INTO golf_clubs (
-                            brand_id, club_type_id, model_name, 
-                            current_price, year_released
-                        ) VALUES (%s, %s, %s, %s, %s)
-                        RETURNING id
-                        """,
-                        (
-                            brand_id,
-                            club_type_id,
-                            club_data['model'],
-                            club_data.get('price'),
-                            2024  # Default year, should be extracted from data
-                        )
+                        f"INSERT INTO club_specifications ({', '.join(columns)}) "
+                        f"VALUES ({', '.join(['%s'] * len(columns))})",
+                        [club_id] + [variant.get(field) for field in fields]
+                        + [source_name, url, True, Json(club_data['specs'])],
                     )
-                    club_id = cursor.fetchone()['id']
-                    added += 1
-            
-            # Add product source entry
-            if club_data.get('url'):
-                with db.get_cursor() as cursor:
-                    cursor.execute(
-                        """
-                        INSERT INTO product_sources (
-                            golf_club_id, source_name, product_url, 
-                            price, in_stock
-                        ) VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (golf_club_id, source_name) DO UPDATE
-                        SET product_url = EXCLUDED.product_url,
-                            price = EXCLUDED.price,
-                            in_stock = EXCLUDED.in_stock,
-                            last_checked = CURRENT_TIMESTAMP
-                        """,
-                        (
-                            club_id,
-                            source_name,
-                            club_data['url'],
-                            club_data.get('price'),
-                            club_data.get('in_stock', True)
-                        )
-                    )
-        
-        except Exception as e:
-            print(f"Error importing club {club_data.get('model')}: {str(e)}")
-            continue
+                cursor.execute("UPDATE golf_clubs SET specs_validated = TRUE WHERE id = %s", (club_id,))
+            refresh_current_price(cursor, club_id)
     
     return added, updated
 

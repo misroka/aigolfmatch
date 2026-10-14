@@ -134,11 +134,20 @@ def get_club_by_id(club_id: int) -> Optional[Dict[str, Any]]:
             gc.*,
             b.name as brand_name,
             ct.name as club_type_name,
-            cs.*
+            cs.id AS specification_id,
+            cs.loft_degrees, cs.lie_angle_degrees, cs.club_length_inches,
+            cs.swing_weight, cs.shaft_material, cs.shaft_flex,
+            cs.shaft_model, cs.grip_model, cs.club_head_material,
+            cs.club_head_volume_cc, cs.offset_mm, cs.bounce_degrees
         FROM golf_clubs gc
         JOIN brands b ON gc.brand_id = b.id
         JOIN club_types ct ON gc.club_type_id = ct.id
-        LEFT JOIN club_specifications cs ON gc.id = cs.golf_club_id
+        LEFT JOIN LATERAL (
+            SELECT * FROM club_specifications
+            WHERE golf_club_id = gc.id
+            ORDER BY updated_at DESC NULLS LAST, id DESC
+            LIMIT 1
+        ) cs ON TRUE
         WHERE gc.id = %s
     """
     

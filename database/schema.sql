@@ -28,6 +28,10 @@ CREATE TABLE golf_clubs (
     year_discontinued INTEGER,
     msrp DECIMAL(10, 2),
     current_price DECIMAL(10, 2),
+    price_updated_at TIMESTAMP,
+    source_name VARCHAR(100),
+    source_url TEXT,
+    specs_validated BOOLEAN NOT NULL DEFAULT FALSE,
     is_current BOOLEAN DEFAULT TRUE,
     description TEXT,
     target_handicap_range VARCHAR(50),  -- e.g., "0-10", "10-20", "20+"
@@ -55,6 +59,10 @@ CREATE TABLE club_specifications (
     club_head_volume_cc INTEGER,  -- For woods/drivers
     offset_mm DECIMAL(4, 1),
     bounce_degrees DECIMAL(4, 1),  -- For wedges
+    source_name VARCHAR(100),
+    source_url TEXT,
+    validated BOOLEAN NOT NULL DEFAULT FALSE,
+    raw_specs JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -68,7 +76,9 @@ CREATE TABLE product_sources (
     price DECIMAL(10, 2),
     in_stock BOOLEAN,
     last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    price_checked_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(golf_club_id, source_name)
 );
 
 -- Reviewer profiles for personalized recommendations
