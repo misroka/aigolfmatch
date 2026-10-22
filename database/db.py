@@ -7,6 +7,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
+from database.validation import number, refresh_current_price, source_url, stock
+
 load_dotenv()
 
 
@@ -19,7 +21,8 @@ class DatabaseConnection:
             'port': os.getenv('DB_PORT', '5432'),
             'database': os.getenv('DB_NAME', 'golf_clubs'),
             'user': os.getenv('DB_USER', 'postgres'),
-            'password': os.getenv('DB_PASSWORD', '')
+            'password': os.getenv('DB_PASSWORD', ''),
+            'options': '-c timezone=UTC',
         }
         # Add SSL mode if specified (required for Azure PostgreSQL)
         sslmode = os.getenv('DB_SSLMODE')
@@ -134,11 +137,20 @@ def get_club_by_id(club_id: int) -> Optional[Dict[str, Any]]:
             gc.*,
             b.name as brand_name,
             ct.name as club_type_name,
-            cs.*
+            cs.id AS specification_id,
+            cs.loft_degrees, cs.lie_angle_degrees, cs.club_length_inches,
+            cs.swing_weight, cs.shaft_material, cs.shaft_flex,
+            cs.shaft_model, cs.grip_model, cs.club_head_material,
+            cs.club_head_volume_cc, cs.offset_mm, cs.bounce_degrees
         FROM golf_clubs gc
         JOIN brands b ON gc.brand_id = b.id
         JOIN club_types ct ON gc.club_type_id = ct.id
-        LEFT JOIN club_specifications cs ON gc.id = cs.golf_club_id
+        LEFT JOIN LATERAL (
+            SELECT * FROM club_specifications
+            WHERE golf_club_id = gc.id
+            ORDER BY updated_at DESC NULLS LAST, id DESC
+            LIMIT 1
+        ) cs ON TRUE
         WHERE gc.id = %s
     """
     
@@ -195,27 +207,40 @@ def insert_club(club_data: Dict[str, Any]) -> int:
         return cursor.fetchone()['id']
 
 
-def update_club_price(club_id: int, price: float, source: str):
-    """Update the current price of a club."""
-    query = """
-        UPDATE golf_clubs 
-        SET current_price = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
-    """
-    
-    with db.get_cursor() as cursor:
-        cursor.execute(query, (price, club_id))
-    
-    # Also log in product_sources
+def update_club_price(club_id: int, price: Optional[float], source: str,
+                      in_stock: Optional[bool] = None,
+                      product_url: Optional[str] = None):
+    """Record an observed offer; unknown price/stock never implies availability."""
+    if not isinstance(source, str) or not source.strip() or len(source) > 100:
+        raise ValueError("source must be a nonempty name of at most 100 characters")
+    try:
+        price = number(price)
+        numeric_id = number(club_id, 1, 2147483647)
+    except (TypeError, OverflowError):
+        raise ValueError("club_id and price must be valid finite numbers") from None
+    if numeric_id is None or not numeric_id.is_integer():
+        raise ValueError("club_id must be a positive integer")
+    in_stock = stock(in_stock)
+    if product_url is not None:
+        product_url = source_url(product_url)
     source_query = """
-        INSERT INTO product_sources (golf_club_id, source_name, price, last_checked)
-        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+        INSERT INTO product_sources (
+            golf_club_id, source_name, price, in_stock, product_url,
+            last_checked, price_checked_at
+        ) VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP,
+                  CASE WHEN %s IS NOT NULL THEN CURRENT_TIMESTAMP ELSE NULL END)
         ON CONFLICT (golf_club_id, source_name) 
-        DO UPDATE SET price = EXCLUDED.price, last_checked = CURRENT_TIMESTAMP
+        DO UPDATE SET price = EXCLUDED.price,
+                      in_stock = EXCLUDED.in_stock,
+                      product_url = COALESCE(EXCLUDED.product_url, product_sources.product_url),
+                      last_checked = EXCLUDED.last_checked,
+                      price_checked_at = EXCLUDED.price_checked_at
     """
-    
     with db.get_cursor() as cursor:
-        cursor.execute(source_query, (club_id, source, price))
+        cursor.execute(source_query, (
+            int(numeric_id), source.strip(), price, in_stock, product_url, price,
+        ))
+        refresh_current_price(cursor, int(numeric_id))
 
 
 def log_scrape(source_name: str, scrape_type: str, status: str, 

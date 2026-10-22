@@ -28,6 +28,10 @@ CREATE TABLE golf_clubs (
     year_discontinued INTEGER,
     msrp DECIMAL(10, 2),
     current_price DECIMAL(10, 2),
+    price_updated_at TIMESTAMP,
+    source_name VARCHAR(100),
+    source_url TEXT,
+    specs_validated BOOLEAN NOT NULL DEFAULT FALSE,
     is_current BOOLEAN DEFAULT TRUE,
     description TEXT,
     target_handicap_range VARCHAR(50),  -- e.g., "0-10", "10-20", "20+"
@@ -55,6 +59,10 @@ CREATE TABLE club_specifications (
     club_head_volume_cc INTEGER,  -- For woods/drivers
     offset_mm DECIMAL(4, 1),
     bounce_degrees DECIMAL(4, 1),  -- For wedges
+    source_name VARCHAR(100),
+    source_url TEXT,
+    validated BOOLEAN NOT NULL DEFAULT FALSE,
+    raw_specs JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -68,7 +76,9 @@ CREATE TABLE product_sources (
     price DECIMAL(10, 2),
     in_stock BOOLEAN,
     last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    price_checked_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(golf_club_id, source_name)
 );
 
 -- Reviewer profiles for personalized recommendations
@@ -156,3 +166,26 @@ CREATE INDEX idx_club_reviews_profile ON club_reviews(reviewer_profile_id);
 CREATE INDEX idx_reviewer_profiles_handicap ON reviewer_profiles(handicap);
 CREATE INDEX idx_reviewer_profiles_skill ON reviewer_profiles(skill_level);
 CREATE INDEX idx_scraping_logs_source_date ON scraping_logs(source_name, started_at);
+
+-- Fitting outcome tables
+-- Measured fitting data is separate from reviews and retained only with consent.
+CREATE TABLE IF NOT EXISTS fitting_outcomes (
+    id BIGSERIAL PRIMARY KEY,
+    golfer_id UUID NOT NULL,
+    golf_club_id INTEGER NOT NULL REFERENCES golf_clubs(id),
+    profile JSONB NOT NULL CHECK (jsonb_typeof(profile) = 'object'),
+    club_snapshot JSONB NOT NULL CHECK (jsonb_typeof(club_snapshot) = 'object'),
+    carry_yards DOUBLE PRECISION NOT NULL CHECK (carry_yards BETWEEN 0 AND 400),
+    dispersion_yards DOUBLE PRECISION NOT NULL CHECK (dispersion_yards BETWEEN 0 AND 150),
+    shot_count INTEGER NOT NULL CHECK (shot_count BETWEEN 5 AND 500),
+    measured_at TIMESTAMPTZ NOT NULL CHECK (measured_at <= CURRENT_TIMESTAMP),
+    consent BOOLEAN NOT NULL CHECK (consent IS TRUE),
+    consented_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    consent_version VARCHAR(50) NOT NULL,
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_fitting_outcomes_golfer
+    ON fitting_outcomes(golfer_id);
+CREATE INDEX IF NOT EXISTS idx_fitting_outcomes_measured
+    ON fitting_outcomes(measured_at);

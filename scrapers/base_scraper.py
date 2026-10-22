@@ -85,15 +85,19 @@ class BaseScraper(ABC):
         Returns:
             Float price or None
         """
-        if not price_text:
+        if price_text is None or price_text == "":
             return None
         
-        # Remove currency symbols and commas
+        # Reject ranges and ambiguous text rather than joining multiple prices.
         import re
-        price_text = re.sub(r'[^\d.]', '', price_text)
+        import math
+        match = re.fullmatch(r'\s*\$?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*', str(price_text))
+        if not match:
+            return None
         
         try:
-            return float(price_text)
+            price = float(match.group(1).replace(',', ''))
+            return price if math.isfinite(price) and price >= 0 else None
         except (ValueError, TypeError):
             return None
     
